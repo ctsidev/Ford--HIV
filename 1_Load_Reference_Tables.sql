@@ -1,5 +1,5 @@
 -- *******************************************************************************************************
--- HOUSEKEEPING START
+-- Step 1 HOUSEKEEPING START
 --   1. Create table to capture matadata during the process
 --   2. Create driver table for primary care departments
 --   3. Create driver table for HIC care providers
