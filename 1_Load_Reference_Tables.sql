@@ -80,7 +80,7 @@ COMMIT;
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_DXDRV_ICD' AS TABLE_NAME
         ,TOTAL_COUNT
-        ,'Load ICD dx code driver support file for ' + DX_FLAG AS DESCRIPTION
+        ,'Load ICD dx code driver support file for ' || DX_FLAG AS DESCRIPTION
 FROM (
         SELECT 
             DX_FLAG
@@ -117,13 +117,13 @@ COMMIT;
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_DXDRV' AS TABLE_NAME
         ,TOTAL_COUNT
-        ,'Load ICD dx code driver support file for ' + FLAG AS DESCRIPTION
+        ,'Load ICD dx code driver support file for ' || DX_FLAG AS DESCRIPTION
 FROM (
         SELECT 
-            FLAG
+            DX_FLAG
             ,COUNT(*) AS TOTAL_COUNT
         FROM XDR_FORD_DXDRV
-        GROUP BY FLAG
+        GROUP BY DX_FLAG
 );
 COMMIT;
 
