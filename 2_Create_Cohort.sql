@@ -22,11 +22,13 @@ FROM (
                ,dx.EFFECTIVE_DATE
         FROM i2b2.int_dx             dx
         JOIN XDR_FORD_DXDRV         drv ON dx.dx_id = drv.dx_id AND drv.dx_flag = 'HIV' 
+        WHERE dx.EFFECTIVE_DATE BETWEEN '03/02/2013' AND '02/28/2018'
         UNION
         SELECT DISTINCT dx.pat_id
                ,dx.contact_date
         FROM pat_enc_dx             dx
         JOIN XDR_FORD_DXDRV         drv ON dx.dx_id = drv.dx_id AND drv.dx_flag = 'HIV' 
+        WHERE dx.contact_date BETWEEN '03/02/2013' AND '02/28/2018'
     )
 GROUP BY pat_id;      --3160
 
@@ -105,8 +107,8 @@ SELECT 	DISTINCT coh.pat_id,
                       --and p.ordering_date between to_date('03/01/2013','mm/dd/yyyy') and to_date('05/08/2018','mm/dd/yyyy')
                       and o.ord_value is not null
                       and o.order_proc_id is not null
-                      -- AND p.order_time BETWEEN SYSDATE - (365.25 * 3) AND SYSDATE;
-                      ;
+                      AND p.order_time BETWEEN '03/02/2013' AND '02/28/2018';
+
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
 SELECT 'xdr_Ford_HIVlab' AS TABLE_NAME
