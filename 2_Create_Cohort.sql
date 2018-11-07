@@ -12,12 +12,12 @@
 -- to be used to pull labs and meds counts
 --
 -- *******************************************************************************************************
-DROP TABLE XDR_FORD_DX_HIV PURGE;
-CREATE TABLE XDR_FORDXDR_FORD_DX_HIV_PAT_HIV AS
+DROP TABLE XDR_FORD_DX_HIV_coh PURGE;
+CREATE TABLE XDR_FORD_DX_HIV_coh AS
 SELECT pat_id
 ,MIN(EFFECTIVE_DATE) AS FIRST_HIV_DATE
 FROM (
-        -- UCLA has legacy data that we be brought it
+        -- UCLA has legacy data
         SELECT DISTINCT dx.pat_id
                ,dx.EFFECTIVE_DATE
         FROM i2b2.int_dx             dx
@@ -33,11 +33,11 @@ GROUP BY pat_id;      --3160
 -- SELECT COUNT(*),COUNT(PAT_ID) FROM XDR_FORD_PAT_HIV;--5866(10/04/18)        5782	5782
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
-SELECT 'XDR_FORD_DX_HIV' AS TABLE_NAME
+SELECT 'XDR_FORD_DX_HIV_coh' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
     ,'Counts for HIV diagnoses' AS DESCRIPTION
-FROM XDR_FORD_DX_HIV;
+FROM XDR_FORD_DX_HIV_coh;
 COMMIT;
 
 
@@ -48,9 +48,6 @@ COMMIT;
 --Step 2.2:     Pull Labs based on lab driver LOINC codes
 --               order_type_c = 7 is Lab Test, Check the codes at your site 
 ----------------------------------------------------------------------------
-
-
---pull all patients or only those with DX? 10/10/18 
 DROP TABLE xdr_Ford_HIVlab PURGE;
 CREATE TABLE xdr_Ford_HIVlab AS 
 SELECT 	DISTINCT coh.pat_id,
@@ -74,7 +71,7 @@ SELECT 	DISTINCT coh.pat_id,
                 p.order_type_c,
                 o.RESULT_FLAG_C,
                 op2.specimn_taken_time,
-                drv.LAB_FLAG,
+                drv.STEP,
 		--If there is a relevant operator in this field ('%','<','>','='), it gets captured in its own field
                 case when regexp_like(ord_value,'[%<>]=*','i') then regexp_substr(o.ord_value,'[><%]=*') else null end as harm_sign,
                 trim(o.ord_value) as harm_text_val,
@@ -93,15 +90,15 @@ SELECT 	DISTINCT coh.pat_id,
                        then to_number(regexp_substr(ord_value,'-?[[:digit:],.]*$'),'9999999999D9999999999', 'NLS_NUMERIC_CHARACTERS = ''.,''' )
                   when regexp_like(ord_value,'%','i') 
                        then to_number(regexp_substr(ord_value,'[1-9]\d*(\.\,\d+)?'),'9999999999D9999999999', 'NLS_NUMERIC_CHARACTERS = ''.,''' )
-                  else ord_num_value end as harm_num_val,
-                cc.common_name
+                  else ord_num_value end as harm_num_val
+                  ,cc.common_name
               FROM order_results           o
               JOIN order_proc              p   ON p.order_proc_id = o.order_proc_id
               JOIN order_proc_2            op2 on p.ORDER_PROC_ID = op2.ORDER_PROC_ID 
-              JOIN js_xdr_walling_final_pat_coh    coh ON p.pat_id = coh.pat_id AND (coh.PL_CIRRHOSIS = 1 OR COH.DX_CIRRHOSIS = 1)
+              JOIN patient                 coh ON p.pat_id = coh.pat_id
               JOIN clarity_component       cc  ON o.component_id = cc.component_id
-              LEFT JOIN lnc_db_main                ldm ON CC.DEFAULT_LNC_ID = ldm.record_id 
-              join XDR_FORD_labDRV     drv ON coalesce(ldm.lnc_code, cc.loinc_code)  = drv.LOINC_MAPPING
+              LEFT JOIN lnc_db_main        ldm ON CC.DEFAULT_LNC_ID = ldm.record_id 
+              join XDR_FORD_labDRV         drv ON coalesce(ldm.lnc_code, cc.loinc_code)  = drv.BIP_LOINC_MAPPING
               where 
                       p.order_type_c in (7)--, 26, 62, 63)			--double check this codes
                       --and p.ordering_date between to_date('03/01/2013','mm/dd/yyyy') and to_date('05/08/2018','mm/dd/yyyy')
@@ -111,7 +108,7 @@ SELECT 	DISTINCT coh.pat_id,
                       -- AND p.order_time BETWEEN SYSDATE - (365.25 * 3) AND SYSDATE;
                       ;
 --Add counts for QA
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
 SELECT 'xdr_Ford_HIVlab' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
@@ -122,7 +119,6 @@ COMMIT;
 ----------------------------------------------------------------------------
 --Step 2.3:     Harmonize lab results to apply HIV algorithm
 ----------------------------------------------------------------------------
- 
 drop table XDR_FORD_HIVlab_res purge;
 create table XDR_FORD_HIVlab_res as
 SELECT DISTINCT --lab.pat_id, 
@@ -131,145 +127,83 @@ lab.*,
         CASE WHEN 
                   (REGEXP_LIKE (lab.ord_value, 'NO','i')  ---  NON and NONE are redundant since they both contain NO already.
                   AND  REGEXP_LIKE (lab.ord_value,'REA(C|V)(I|T)','i') ) --- You can roll these up into just one statement.  It will look for REA followed by a C or a V followed by a I or a T.
-                  OR REGEXP_LIKE (lab.ord_value, 'NR','i')
-                  OR REGEXP_LIKE (lab.ord_value, 'N/R','i')
---                  OR REGEXP_LIKE (lab.ord_value, 'NEGATIVE','i') ---  NEG will also cover this
-                  OR REGEXP_LIKE (lab.ord_value, 'NEG','i') 
+                          OR REGEXP_LIKE (lab.ord_value, 'NR','i')
+                          OR REGEXP_LIKE (lab.ord_value, 'N/R','i')
+                          OR REGEXP_LIKE (lab.ord_value, 'NEG','i') 
                   THEN 0
             WHEN UPPER(lab.ord_value) LIKE 'REACTIVE' 
                   OR REGEXP_LIKE (lab.ord_value, 'LY REACTIVE','i')                      --- This will cover the next three lines.
---                  OR REGEXP_LIKE (lab.ord_value, 'WEAKLY REACTIVE','i'
---                  OR REGEXP_LIKE (lab.ord_value, 'STRONGLY REACTIVE','i')
---                  OR REGEXP_LIKE (lab.ord_value, 'REPEATEDLY REACTIVE','i')
                   OR REGEXP_LIKE (lab.ord_value, 'POSITIVE','i') 
+                  OR UPPER(TRIM(lab.ord_value)) = 'DETECTED'
                       THEN 1            
             ELSE null 
             END LAB_FLAG
   FROM XDR_FORD_HIVlab lab;
+  SELECT count(*) from XDR_FORD_HIVlab_res WHERE LAB_FLAG = 1                ;--5293        730          689
 
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
-SELECT 'XDR_FORD_HIVlab_res' AS TABLE_NAME
-	,COUNT(distinct pat_id) AS PAT_COUNT
-	,COUNT(*) AS TOTAL_COUNT
-    ,'Counts for HIV labs where results were harmonized' AS DESCRIPTION
-FROM XDR_FORD_HIVlab_res;
-COMMIT;
-
-
-
--- --FROM i2b2.lz_clarity_lab          lab   
--- -- where 
--- --      lab.proc_id IN (
--- --      SELECT DISTINCT PROC_ID FROM xdr_ford_lab_sel WHERE HIV = 1  --HIV driver table
--- --      )
---      ;
---      --in (7608, 107633)   --ucrex tests being used at that time HIV
--- CREATE INDEX XDR_FORD_HIVlab_PATIDIX ON XDR_FORD_HIVlab(pat_id);
--- CREATE INDEX XDR_FORD_HIVLAB_PRREix ON XDR_FORD_HIVlab(proc_id,ord_value,lab_flag);
--- CREATE INDEX XDR_FORD_HIVLAB_PROCIDIX ON XDR_FORD_HIVlab(PROC_ID);
--- CREATE INDEX XDR_FORD_HIVLAB_COMPIDIX ON XDR_FORD_HIVlab(COMPONENT_ID);
--- SELECT COUNT(*) FROM XDR_FORD_HIVlab;                                             --48481(10/04/2018)       178019(4/7/17)
--- SELECT COUNT(DISTINCT pat_id) FROM XDR_FORD_HIVlab;                               --4235(10/04/2018)       118677(4/7/17)
-
-
-
---CREATE TABLE WITH HIV LAB PATIENTS to determine 
---(DO WE NEED TO USE HARMOZIED VALUE?)
-
-
-
---Add other HIV patients identified from LABS that have not previously identified by HIV DX (Are there any?)
-/*
-POSITIVE RESULTS:
-A patient shall be labelled as positive if:
-1.	IF a test with proc_id = 107639(HIV-1 AB WESTERN BLOT) WHERE results = positive
-a.	OR if test with proc_id = 107691(HIV-1 RNA QUANT PCR) WHERE results > 200 
-b.	OR test with proc_id = 107665(HIV-1 QUANTITATION PCR) WHERE results > 20 
-c.	OR test with proc_id = 107683(HIV-1 DNA,QUALITATIVE PCR) WHERE results = ‘DETECTED’ 
-d.	OR test with proc_id = 107673(HIV-1 DIRECT AG (NON-ID) ELISA) WHERE results = ‘POSITIVE’ 
-e.	OR IF a test with proc_id = 107709(HIV-1 GENOTYPE RT AND PR) WHERE results = positive is found THEN ‘positive’ ;
-2.	ELSE IF an Antibody test (proc_ids = 107633, 7608, 327238, 244223, 327256, 728018, 327252, 725902, 327242, 327260, 60993, 4954, 56608) WHERE results = positive THEN ‘positive’ ;
-*/
--- create HIB labs repository to implement new logic to analyze resutls
-----------------------------------------------------------------------------
 
 ----------------------------------------------------------------------------
---Step 2.3:     Harmonize lab results to apply HIV algorithm
+--Step 2.4:     Flag positive HIV patients based on lab results
 ----------------------------------------------------------------------------
-drop table xdr_FORD_HIV_confirmed purge;
-create table xdr_FORD_HIV_confirmed as 
+drop table xdr_FORD_lab_HIV_COH purge;
+create table xdr_FORD_lab_HIV_COH as 
 SELECT --1449
-      distinct RES.pat_id, 1 as HIV_TEST
+      distinct RES.pat_id
+      ,RESULT_DATE
 FROM XDR_FORD_HIVlab_res RES      
 WHERE 
-step = '2'
--- component_id --with a positive confirmatory test, (assumes the screening Ab test is positive)
---             IN (SELECT DISTINCT component_id
---                 FROM XDR_FORD_LABDRV
---                 WHERE 
---                 --description like '% ANTIBODY %' 
---                 step = '2'
---                 )
-AND RES.LAB_FLAG = 1
+      step = '2'
+      AND RES.LAB_FLAG = 1
 UNION
 --i.    Amplicor, RealTime TaqMan V1, Taqman V2 HIV RNA >200 HIV mRNA copies/mL (in your list proc_id=107691); 
           SELECT --171
-                distinct RES.pat_id, 1 as HIV_TEST
+                distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res RES
-          WHERE --PROC_ID = '107691'
+          WHERE 
                 step = '1A'
                 AND (harm_num_val <> 9999999  AND harm_num_val >  200)--692
 UNION
 --ii, COBAS® AmpliPrep/COBAS TaqMan® HIV-1 (qPCR for HIV RNA) range is 20–10,000,000 HIV-1 RNA copies/mL (1.30-7.00 log copies/mL), so value >20 would be a positive (is this: 107665), 
           SELECT --434
-                distinct RES.pat_id, 1 as HIV_TEST
+                distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res     RES
-          WHERE --PROC_ID = '107665'
+          WHERE 
                 step = '1B'
-                AND ((harm_num_val <> 9999999  AND harm_num_val >  20)  --OR (REGEXP_LIKE (ORD_VALUE,'>(100|75)','i')))  --new addition  --for future dev it needs to strip numeric value and work for all
+                AND ((harm_num_val <> 9999999  AND harm_num_val >  20))  --OR (REGEXP_LIKE (ORD_VALUE,'>(100|75)','i')))  --new addition  --for future dev it needs to strip numeric value and work for all
 UNION
 --iii, quantitative HIV PCR (107683) 
           SELECT --45
-                distinct RES.pat_id, 1 as HIV_TEST
+                distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res    RES
-          WHERE --PROC_ID = '107683' 
+          WHERE 
                 step = '1C'
                 AND ORD_VALUE = 'DETECTED'
 UNION
 --iv, positive p24 (107673)
           SELECT --3
-                distinct RES.pat_id, 1 as HIV_TEST
+                distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res   RES   
-          WHERE --PROC_ID = '107673' 
+          WHERE 
                 step = '1D'
                 AND LAB_FLAG = 1
 UNION
 --western blot (107639); 
           SELECT --702
-                distinct pat_id, 1 as HIV_TEST
+                distinct pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res     RES
-          WHERE --PROC_ID = '107639' 
+          WHERE 
                 step = '1'
                 AND LAB_FLAG = 1 --600 (702)
-UNION
---will return an interpretable test of positive if >600 copies/mL then positive for HIV 
---(requires >600 copies/mL and for interpretation 25% representative population of HIV virions circulating to properly assess for virus mutations)
-            SELECT --590
-                  distinct pat_id, 1 as HIV_TEST
-            FROM XDR_FORD_HIVLAB     RES
-            WHERE --PROC_ID = '107709' 
-                step = '2'    
-                AND ORD_VALUE = 'DETECTED'  --384  (590)
 ;
 commit;
-SELECT COUNT(*) FROM XDR_FORD_HIV_CONFIRMED;  --2468(10/04/2018)            1616(4/7/17)
+SELECT COUNT(*), COUNT(DISTINCT PAT_ID)  FROM  xdr_FORD_lab_HIV_COH;  --7965	2933(10/29/18)      989(10/29/2018)     2468(10/04/2018)            1616(4/7/17)
 
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
-SELECT 'xdr_FORD_HIV_confirmed' AS TABLE_NAME
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_lab_HIV_COH' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
     ,'Counts for HIV labs where results were harmonized' AS DESCRIPTION
-FROM xdr_FORD_HIV_confirmed;
+FROM xdr_FORD_lab_HIV_COH;
 COMMIT;
 
 
@@ -277,310 +211,231 @@ COMMIT;
 
 
 
-
-
-
---DID WE FIND ANY PATIENT THAT WAS NOT ALREADY IN THE HIV DX PATIENT TABLE?
-SELECT COUNT(DISTINCT PAT_ID) FROM xdr_FORD_HIV3 WHERE PAT_ID NOT IN (SELECT PAT_ID FROM XDR_FORD_HIV);   --333
-
---IF WE DID, INSERT PATIENT INTO 
-alter table XDR_FORD_HIV add( lab_only number);
-
-INSERT INTO XDR_FORD_HIV (pat_id, LAB_ONLY)
-SELECT DISTINCT PAT_ID,1 as lab_only FROM xdr_FORD_HIV3 WHERE PAT_ID NOT IN (SELECT PAT_ID FROM XDR_FORD_HIV);
+----------------------------------------------------------------------------
+--Step 2.5:     Create final cohor table
+----------------------------------------------------------------------------
+DROP TABLE XDR_FORD_COH PURGE;
+CREATE TABLE XDR_FORD_COH (
+PAT_ID VARCHAR2(8 BYTE)
+,first_hiv_dx_date DATE
+,first_hiv_lab_date DATE
+,COHORT_TYPE VARCHAR2(50 BYTE)
+);
+TRUNCATE TABLE XDR_FORD_COH;
 COMMIT;
---333 rows inserted
---------------------------------------------------------------------------------
--- Investigator Counts Review Pull ---------------------------------------------
---------------------------------------------------------------------------------
-/*DROP TABLE xdr_Ford_labdrv PURGE;
-CREATE TABLE xdr_Ford_labdrv AS
-SELECT EXTRACT(YEAR FROM specimn_taken_time) AS year_specimn_taken_time
-,proc_id, description, component_id, component_name, COUNT(*) AS total 
-	FROM xdr_Ford_laball    
-  GROUP BY EXTRACT(YEAR FROM specimn_taken_time),proc_id, description, component_id, component_name
-  ORDER BY EXTRACT(YEAR FROM specimn_taken_time)
-  ,component_name;
-CREATE INDEX xdr_Ford_labdrv_idx ON xdr_Ford_labdrv (proc_id, component_id);
 
-SELECT * FROM xdr_Ford_labdrv;
---------------------------------------------------------------------------------
--- Pull only labs selectd by Investigator --------------------------------------
---------------------------------------------------------------------------------
-DROP TABLE xdr_Ford_lab PURGE;
-CREATE TABLE xdr_Ford_lab AS 
-SELECT DISTINCT lab.*
-  FROM xdr_Ford_laball            lab  
-  JOIN xdr_Ford_lab_sel            drv ON lab.proc_id = drv.proc_id AND lab.component_id = drv.component_id
+
+----------------------------------------------------------------------------
+--Step 2.6:     Insert patients with HIV diagnoses
+----------------------------------------------------------------------------
+INSERT INTO XDR_FORD_COH(PAT_ID, first_hiv_dx_date,COHORT_TYPE,first_hiv_lab_date)
+select DISTINCT dx.pat_id
+        ,dx.HIV_DX_DATE as first_hiv_dx_date
+        ,CASE WHEN lab.pat_id is null then 'ONLY DX' 
+                else 'DX + LAB'
+                END COHORT_TYPE
+        ,lab.first_hiv_lab_date
+from xdr_FORD_dx_HIV_COH    dx
+LEFT JOIN (select pat_id
+                ,MIN(RESULT_DATE) AS first_hiv_lab_date
+            from xdr_FORD_lab_HIV_COH
+            group by pat_id) lab on dx.pat_id = lab.pat_id
 ;
-CREATE INDEX xdr_Ford_lab_patidx ON xdr_Ford_lab (pat_id);
-CREATE INDEX xdr_Ford_lab_labidx ON xdr_Ford_lab (proc_id, component_id);
-SELECT COUNT(*) FROM xdr_Ford_lab;                                             --5823
-SELECT COUNT(DISTINCT pat_id) FROM xdr_Ford_lab;                               --1789
-*/
+COMMIT;
+
+----------------------------------------------------------------------------
+--Step 2.6:     Insert patients with HIV labs
+----------------------------------------------------------------------------
+INSERT INTO XDR_FORD_COH(PAT_ID, COHORT_TYPE, first_hiv_lab_date)
+select lab.pat_id
+                ,'LAB ONLY' AS COHORT_TYPE
+                ,MIN(lab.RESULT_DATE) AS first_hiv_lab_date
+            from xdr_FORD_lab_HIV_COH       lab
+            LEFT JOIN XDR_FORD_COH          coh on lab.pat_id = coh.pat_id
+            WHERE COH.PAT_ID IS NULL
+            group by lab.pat_id;
+COMMIT;           
+
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_DXDRV' AS TABLE_NAME
+        ,TOTAL_COUNT
+        ,'Patients where cohort type = ' || COHORT_TYPE AS DESCRIPTION
+FROM (
+        SELECT 
+            COHORT_TYPE
+            ,COUNT(*) AS TOTAL_COUNT
+        FROM XDR_FORD_COH
+        GROUP BY COHORT_TYPE
+);
+COMMIT;
 
 -- *******************************************************************************************************
--- STEP 
---   Create Medications List table for cohort
---      Note to remove MAR if inpatient meds are not required
---   Prerequisite(s): PatientDemographics.sql, Encounter.sql (Decide whether to link by pat_id or csn)
---
---   Modification Log
---      TT-4/6/2016: Added classes to standard pull per email from Dr. Bell on 4/5 titled "study"
---	RF- 08/16/16 - Modified to use Used_Med_ID instead of medication_id. and the meds rather than the meds2 table
---			See Setp3 in ETL for deets.
--- *******************************************************************************************************
----- For IP Meds (See ORDERING MODE) there must be a mar.taken_time or last_admin_inst.
---------------------------------------------------------------------------------
--- Pull all meds to get counts -------------------------------------------------
---------------------------------------------------------------------------------
---We only need to pull HIV drugs
--- I looked for HIV dx patients and pull all their meds and sent counts to PI (she wanted counts by year
--- to take into account protocols changes over time)
--- she finally provided a link to a list of meds with brand and genetric names
--- the final pull only captures meds for HIV patients since it is not used with the rest
-
-DROP TABLE xdr_Ford_medall PURGE;
-CREATE TABLE xdr_Ford_medall AS
-SELECT DISTINCT pat.pat_id
-               --,pat.pat_mrn_id
-               --,pat.study_id
-               ,med.pat_enc_csn_id
-               ,med.order_med_id
-               ,med.used_med_id as medication_id
-               ,med.medication_name
-               ,med.generic_name
-               ,med.ordering_mode
-               ,med.ordering_date
-               ,med.start_date
-               ,med.end_date
-               ,med.order_status
-               ,xmrs.NAME                                                       AS result
-               ,nvl(mar.taken_time, med.ordering_date)                          AS taken_time_order_date
-               ,nvl(mar.sig, med.hv_discrete_dose)                              AS dose
-               ,mar.taken_time
-               ,mar.sig
-               ,med.dose_unit
-               ,med.order_class
-               ,med.last_admin_inst
-               ,med.quantity
-               ,med.pharm_class
-               ,med.thera_class
-               ,med.pharm_subclass
-  FROM XDR_FORD_HIV                          pat
-  JOIN i2b2.lz_clarity_meds                 med   ON pat.pat_id = med.pat_id
---  FROM xdr_Ford_enc                          pat
---  JOIN i2b2.lz_clarity_meds                 med   ON pat.pat_enc_csn_id  = med.pat_enc_csn_id
-  LEFT JOIN CLARITY.mar_admin_info  mar   ON med.order_med_id = mar.order_med_id
-  LEFT JOIN CLARITY.zc_mar_rslt     xmrs  ON mar.mar_action_c = xmrs.result_c
-  WHERE ((med.ordering_mode = 'Inpatient'                                       
-            AND nvl(mar.taken_time,to_date('01/01/0001')) <> '01/01/0001'       -- taken_time was valid
-            AND nvl(mar.sig,-1) > 0                                             -- and SIG was valid and > 0
-            AND nvl(mar.mar_action_c,-1) <> 125                                 -- and action was anything other than 'Not Given'
-         ) 
-         OR med.ordering_mode != 'Inpatient'
-        )
-    AND med.used_med_id IS NOT NULL
-    --AND nvl(mar.taken_time, med.ordering_date) >= pat.HIV_DX_DATE
-	AND(
-  regexp_like(med.generic_name,'(abacavir|atazanavir|azidothymidine|cobicistat|darunavir|didanosine|dideoxyinosine|dolutegravir|efavirenz|elvitegravir|emtricitabine|enfuvirtide|etravirine|fosamprenavir|fumarate|indinavir|lamivudine|lopinavir|maraviroc|nelfinavir|nevirapine|raltegravir|rilpivirine|ritonavir|saquinavir|stavudine|tenofovir|tipranavir|zidovudine)','i')
-	OR
-	regexp_like(med.medication_name,'(Aptivus|Atripla|Combivir|Complera|Crixivan|Descovy|Edurant|Emtriva|Epivir|Epzicom|Evotaz|Fuzeon|Genvoya|Intelence|Invirase|Isentress|Kaletra|Lexiva|Norvir|Odefsey|Prezcobix|Prezista|Retrovir|Reyataz|Selzentry|Stribild|Sustiva|Tivicay|Triumeq|Trizivir|Truvada|Tybost|Videx|Viracept|Viramune|Viread|Vitekta|Zerit|Ziagen)','i')
-	)
---  ORDER BY pat.PAT_ID, ordering_mode, nvl(mar.taken_time, med.ordering_date)
-;
-CREATE INDEX xdr_Ford_medall_patidx ON xdr_Ford_medall (pat_id);
---CREATE INDEX xdr_Ford_medall_medidx ON xdr_Ford_medall (used_med_id);
-SELECT COUNT(*) FROM xdr_Ford_medall;                                          --56470(4/7/17)      420,952(4/3/17)
-SELECT COUNT(DISTINCT pat_id) FROM xdr_Ford_medall;                            --2340(4/7/17)     2,876(4/3/17)
-  
-  
-  
---------------------------------------------------------------------------------
--- Investigator Counts Review Pull ---------------------------------------------
---------------------------------------------------------------------------------
-/*DROP TABLE xdr_Ford_meddrv PURGE;
-CREATE TABLE xdr_Ford_meddrv AS
-SELECT extract(year from med.TAKEN_TIME_ORDER_DATE) as year_TAKEN_TIME_ORDER_DATE
-      ,med.medication_id
-      ,med.medication_name
-      ,med.generic_name
-      ,pc.name              AS pharm_class
-      ,tc.name              AS thera_class
-      ,sc.name              AS pharm_subclass
-      ,COUNT(*)             AS total 
-	FROM xdr_Ford_medall                     med
-  JOIN clarity.clarity_medication       cm  ON med.medication_id = cm.medication_id
-  LEFT JOIN clarity.zc_pharm_class      pc  ON cm.pharm_class_c = pc.pharm_class_c
-  LEFT JOIN clarity.zc_thera_class      tc  ON cm.thera_class_c = tc.thera_class_c
-  LEFT JOIN clarity.zc_pharm_subclass   sc  ON cm.pharm_subclass_c = sc.pharm_subclass_c
-  GROUP BY extract(year from med.TAKEN_TIME_ORDER_DATE),med.medication_id, med.medication_name, med.generic_name, pc.name, tc.name, sc.name
-  ORDER BY extract(year from med.TAKEN_TIME_ORDER_DATE),med.medication_name;
-CREATE INDEX xdr_Ford_meddrv_idx ON xdr_Ford_meddrv (medication_id);
-
-
-SELECT * FROM xdr_Ford_meddrv;
---------------------------------------------------------------------------------
--- Pull only meds selected by Investigator --------------------------------------
---------------------------------------------------------------------------------
-DROP TABLE xdr_Ford_med PURGE;
-CREATE TABLE xdr_Ford_med AS 
-SELECT DISTINCT med.*
-               --,orm.refills           --Use only if requested by investigator
-               --,omop.mapped_rxnorm    --Use only if requested by investigator
-  FROM xdr_Ford_medall            med  
-  JOIN xdr_Ford_meddrv            drv  ON med.medication_id = drv.medication_id 
-  --JOIN order_med@ttacorda_clarityp orm  ON med.order_med_id = orm.order_med_id
-  --LEFT JOIN i2b2.omop_med_mapping  omop ON med.medication_id = omop.medication_id
-;
-CREATE INDEX xdr_Ford_med_patidx ON xdr_Ford_med (pat_id);
-CREATE INDEX xdr_Ford_med_medidx ON xdr_Ford_med (medication_id);
-SELECT COUNT(*) FROM xdr_Ford_med;                                             --
-SELECT COUNT(DISTINCT pat_id) FROM xdr_Ford_med;                               --
-*/
--- *******************************************************************************************************
--- STEP 1
+-- STEP 3
 --   Create the Patient table
 -- *******************************************************************************************************
 drop  table xdr_ford_pat purge;
 create table xdr_ford_pat as 
-select DISTINCT enc.pat_id
-,pat.MAPPED_RACE_NAME
-/*
-	
-1	White or Caucasian
-8	Unknown
-2	Black or African American
-6	Other
-3	American Indian or Alaska Native
-7	Patient Refused
-4	Asian
-900	Multiple Races
-5	Native Hawaiian or Other Pacific Islander
-*/
-,pat.ETHNIC_GROUP        
-		,pat.MARITAL_STATUS AS MARITAL_STATUS_DESC
-		,CASE WHEN pat.MARITAL_STATUS_C = 1 THEN  'SINGLE'
-				WHEN pat.MARITAL_STATUS_C = 2 THEN  'MARRIED'
-				WHEN pat.MARITAL_STATUS_C = 4 THEN  'SEPARATED'
-				ELSE 'OTHER'
-/*  1-Single   
-  2-Married   
-  3-Divorced   
-  4-Separated   
-  5-Life Partner   
-  6-Widowed   
-  998-Unknown   
- */
- 
-		END MARITAL_STATUS
+select DISTINCT coh.pat_id
+        ,coh.FIRST_HIV_DX_DATE
+        ,coh.FIRST_HIV_LAB_DATE
+        ,coh.COHORT_TYPE
         
-		,pat.LANGUAGE		AS LANGUAGE_DESC
-		,CASE WHEN pat.LANGUAGE_C = 22 THEN 'ENGLISH'
-		WHEN pat.LANGUAGE_C = 96 THEN 'SPANISH'
-		ELSE 'OTHER'
-		END LANGUAGE
-        
-		  --Employment status
-					,zem.NAME as employment_status_DESC
-					,CASE WHEN pt2.EMPY_STATUS_C IN (1,2,4,7) THEN 'EMPLOYED'
-						  WHEN pt2.EMPY_STATUS_C = 5 THEN 'RETIRED'
-						  ELSE 'OTHER_or_UNEMPLOYED'
-					end EMPLOYMENT_STATUS
-							/*
-							1-Full Time   
-							2-Part Time   
-							3-Not Employed   
-							4-Self Employed   
-							5-Retired   
-							6-On Active Military Duty   
-							7-Student - Full Time   
-							8-Student - Part Time   
-							9-Unknown   
-							*/
- 
-
-          
-		  
         ,pat.BIRTH_DATE
-        --Insurance type 
-        ,pat.FINANCIAL_CLASS		AS FINANCIAL_CLASS_DESC
-        		/*,CASE WHEN pat.FINANCIAL_CLASS = 'Commercial' THEN 'COMMERCIAL'
-				WHEN pat.FINANCIAL_CLASS = 'Medicare' THEN 'MEDICARE'
-				WHEN pat.FINANCIAL_CLASS = 'Medicaid' THEN 'MEDICAID'
-				ELSE 'UNKNOWN'*/
-				--WHEN FINANCIAL_CLASSC IN (1) THEN 'COMMERCIAL'
-				  
-/*
-1-Commercial 
-2-Medicare 
-3-Medicaid 
-4-Self-pay 
-5-Worker's Comp 
-6-Tricare 
-7-Champva 
-8-Group Health Plan 
-9-FECA Black Lung 
-10-Blue Shield 
-11-Medigap 
-12-Other 
-*/ 
-
-		--END FINANCIAL_CLASS
-        ,pat.SEX
-        --Incomplete info on patient’s address 
-          ,pt2.ADD_LINE_1
-          ,pt2.CITY
-          ,pt2.ZIP
-            ,CASE WHEN 
-						pt2.ADD_LINE_1 is null
+        ,pat.EMAIL_ADDRESS
+        ,pat.WORK_PHONE
+        ,pat.home_phone
+        ,pat.CUR_PCP_PROV_ID
+        ,pat.PAT_MRN_ID
+        ,pat.sex
+        ,pat.MARITAL_STATUS_C
+        ,zma.name as MARITAL_STATUS
+        ,pat.LANGUAGE_C
+        ,zla.name as language
+        
+        ,pat.ADD_LINE_1
+        ,pat.ADD_LINE_2
+        ,pat.CITY
+        ,pat.ZIP
+        ,CASE WHEN 
+						pat.ADD_LINE_1 is null
 						or
-						pt2.ADD_LINE_1 IN (' ','.',',','0','00','000','0000')
+						pat.ADD_LINE_1 IN (' ','.',',','0','00','000','0000')
 						-- no PO boxes
 						or
 						  (
-						  UPPER(pt2.ADD_LINE_1) like '%BOX%'
+						  UPPER(pat.ADD_LINE_1) like '%BOX%'
 						  and
-						  UPPER(pt2.ADD_LINE_1) like '%PO%'
+						  UPPER(pat.ADD_LINE_1) like '%PO%'
 						  )
 						or --no homeless
-						UPPER(pt2.ADD_LINE_1) = 'HOMELESS'
+						UPPER(pat.ADD_LINE_1) = 'HOMELESS'
 						or --INVALID ADDRESSES
-						UPPER(pt2.ADD_LINE_1) IN ('RETURN MAIL','MAIL RETURNED','BAD ADDRESS')
+						UPPER(pat.ADD_LINE_1) IN ('RETURN MAIL','MAIL RETURNED','BAD ADDRESS')
 						or--INVALID ADDRESSES
-						UPPER(pt2.ADD_LINE_1) LIKE '%NO ADDRESS%'
+						UPPER(pat.ADD_LINE_1) LIKE '%NO ADDRESS%'
 						or
-						UPPER(pt2.ADD_LINE_1) LIKE '%NOT KNOWN%'
+						UPPER(pat.ADD_LINE_1) LIKE '%NOT KNOWN%'
 						or
-						UPPER(pt2.ADD_LINE_1) LIKE 'NO STREET'
+						UPPER(pat.ADD_LINE_1) LIKE 'NO STREET'
 						or
-						UPPER(pt2.ADD_LINE_1) LIKE '%UNKNOWN%'
+						UPPER(pat.ADD_LINE_1) LIKE '%UNKNOWN%'
 						or
-						UPPER(pt2.ADD_LINE_1) LIKE '%0000%'
+						UPPER(pat.ADD_LINE_1) LIKE '%0000%'
 						OR
-						pt2.CITY IS NULL
+						pat.CITY IS NULL
 						or
-						pt2.CITY  IN (' ','.',',','0','00','000','0000')
+						pat.CITY  IN (' ','.',',','0','00','000','0000')
 						or
-						pt2.ZIP IS NULL  
+                        REGEXP_LIKE(pat.CITY,'(RETURN.MAIL|MAIL.RETURNED|BAD.ADDRESS|NO.CITY|UNKNOWN|#)','i')
+                        or
+						pat.ZIP IS NULL  
+                        OR 
+                        LENGTH(pat.ZIP) < 5
+                        OR
+                        REGEXP_LIKE(pat.ZIP,'###','i')
 						OR--HOMELESS
-						UPPER(pt2.CITY) = 'HOMELESS'
+						UPPER(pat.CITY) = 'HOMELESS'
 						or--INVALID ADDRESSES
-						UPPER(pt2.CITY) IN ('RETURN MAIL','MAIL RETURNED','BAD ADDRESS')
+						UPPER(pat.CITY) IN ('RETURN MAIL','MAIL RETURNED','BAD ADDRESS')
 						or
-						UPPER(pt2.CITY) LIKE '%NO CITY%'
+						UPPER(pat.CITY) LIKE '%NO CITY%'
 						or
-						UPPER(pt2.CITY) LIKE '%UNKNOWN%'
+						UPPER(pat.CITY) LIKE '%UNKNOWN%'
 						or
-						UPPER(pt2.CITY) LIKE '%#%' THEN 1
+						UPPER(pat.CITY) LIKE '%#%' THEN 1
 					ELSE 0
-			END INCOMPLETE_ADDRESS
-from xdr_Ford_coh                     enc
-left join i2b2.lz_clarity_patient     pat ON enc.pat_id =  pat.pat_id
-left join clarity.patient             pt2 ON enc.pat_id =  pt2.pat_id
-left join clarity.ZC_EMPY_STAT        zem ON pt2.EMPY_STATUS_C = zem.EMPY_STAT_C
---WHERE enc.ENCOUNTER_FLAG IS NOT NULL;
+			END INCOMPLETE_ADDRESS        
+from XDR_FORD_COH                     coh
+--left join i2b2.lz_clarity_patient     pat ON enc.pat_id =  pat.pat_id
+left join clarity.patient             pat ON coh.pat_id =  pat.pat_id
+left join clarity.ZC_EMPY_STAT        zem ON pat.EMPY_STATUS_C = zem.EMPY_STAT_C
+left join clarity.ZC_language        zla ON pat.language_c = zla.language_c
+left join clarity.ZC_marital_status        zma ON pat.MARITAL_STATUS_C = zma.MARITAL_STATUS_C
+LEFT JOIN clarity.zc_state xst ON pat.state_c = xst.state_c
 ;
-ALTER TABLE xdr_Ford_pat ADD CONSTRAINT xdr_Ford_pat_pk PRIMARY KEY (pat_id);
-SELECT COUNT(*) FROM xdr_Ford_pat;                                             --1070409(4/7/17)      1069238(4/4/17)
-SELECT COUNT(DISTINCT pat_id) FROM xdr_Ford_pat;                               --1070409(4/7/17)      1069238(4/4/17)
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_PAT' AS TABLE_NAME
+        ,TOTAL_COUNT
+        ,'Patients where cohort type = ' || COHORT_TYPE AS DESCRIPTION
+FROM (
+        SELECT 
+            COHORT_TYPE
+            ,COUNT(*) AS TOTAL_COUNT
+        FROM XDR_FORD_PAT
+        GROUP BY COHORT_TYPE
+);
+COMMIT;
+------------------------------------------------------
+--race and ethnicity
+------------------------------------------------------
+drop  table xdr_ford_pat_race purge;
+create table xdr_ford_pat_race as 
+select distinct coh.pat_id
+,rac.PATIENT_RACE_c
+,zra.name as race
+from XDR_FORD_COH                   coh
+LEFT JOIN clarity.PATIENT_RACE      rac ON coh.pat_id = rac.pat_id
+LEFT JOIN clarity.ZC_PATIENT_RACE   zra ON rac.PATIENT_RACE_c = zra.PATIENT_RACE_c;
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT,PAT_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_PAT_RACE' AS TABLE_NAME
+        ,COUNT(*) AS TOTAL_COUNT
+        ,COUNT(distinct pat_id) AS TOTAL_COUNT
+        ,'Patients race records'
+FROM  XDR_FORD_PAT_RACE;
+COMMIT;
+
+
+
+drop  table xdr_ford_pat_ethnicity purge;
+create table xdr_ford_pat_ethnicity as 
+select distinct coh.pat_id
+,pat.ETHNIC_GROUP_C
+,zet.name as ehnicity_group
+from XDR_FORD_COH                       coh
+left join clarity.patient               pat ON coh.pat_id =  pat.pat_id
+LEFT JOIN clarity.ZC_ETHNIC_GROUP       zet ON pat.ETHNIC_GROUP_C = zet.ETHNIC_GROUP_C;
+
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT,PAT_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_PAT_ETHNICITY' AS TABLE_NAME
+        ,COUNT(*) AS TOTAL_COUNT
+        ,COUNT(distinct pat_id) AS TOTAL_COUNT
+        ,'Patients ethnicity records'
+FROM  xdr_ford_pat_ethnicity;
+COMMIT;
+------------------------------------------------------
+--Geolocators (ONLY UCLA)
+------------------------------------------------------
+drop  table XDR_FORD_PAT_GEO purge;
+create table xdr_ford_pat_geo as 
+SELECT DISTINCT COH.PAT_ID
+            ,geo.ADD_LINE_1
+            ,geo.CITY
+            ,geo.EDUCATION_CD
+            ,geo.INCOME_CD
+            ,geo.STATE
+            ,geo.ZIP
+            ,geo.X
+            ,geo.Y
+            ,geo.STATE_FIPS
+            ,geo.CNTY_FIPS
+            ,geo.STCOFIPS
+            ,geo.TRACT
+            ,geo.TRACT_FIPS
+            ,geo.BLKGRP
+            ,geo.FIPS
+            ,geo.UPDATE_DATE
+from XDR_FORD_COH                       coh
+JOIN BIP_PAT_GEOCODE               geo on coh.pat_id = geo.pat_id;
+
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT,PAT_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_PAT_GEO' AS TABLE_NAME
+        ,COUNT(*) AS TOTAL_COUNT
+        ,COUNT(distinct pat_id) AS TOTAL_COUNT
+        ,'Patients geocoding records'
+FROM  XDR_FORD_PAT_GEO;
+COMMIT;
