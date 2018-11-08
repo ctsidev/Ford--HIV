@@ -82,7 +82,7 @@ LEFT JOIN clarity.clarity_medication    cm ON med1.used_med_id = cm.medication_i
 left join clarity.zc_pharm_class        zpc ON cm.pharm_class_c = zpc.pharm_class_c
 left join clarity.zc_thera_class        ztc ON cm.thera_class_c = ztc.thera_class_c
 left join clarity.zc_pharm_subclass     zsc ON cm.pharm_subclass_c = zsc.pharm_subclass_c
-WHERE med1.ORDER_START_TIME between to_date('03/02/2006','mm/dd/yyyy') and to_date('03/31/2018','mm/dd/yyyy') 
+WHERE med1.ORDER_START_TIME between to_date('03/02/2006','mm/dd/yyyy') and to_date('02/28/2018','mm/dd/yyyy') 
 ;
 
 
@@ -119,10 +119,13 @@ SELECT med.medication_id
     --------------------------------------------------------------------------------  
 DROP TABLE xdr_FORD_meddrv PURGE;
 CREATE TABLE xdr_FORD_meddrv
-   (	"PROC_ID" NUMBER(18,0), 
-	"DESCRIPTION" VARCHAR2(254 BYTE), 
-	"COMPONENT_ID" NUMBER(18,0), 
-	"COMPONENT_NAME" VARCHAR2(75 BYTE));
+   (	"MEDICATION_ID" NUMBER(18,0), 
+	"MEDICATION_NAME" VARCHAR2(254 BYTE), 
+    "GENERIC_NAME" VARCHAR2(254 BYTE), 
+    "PHARM_CLASS" VARCHAR2(254 BYTE), 
+    "THERA_CLASS" VARCHAR2(254 BYTE), 
+    "PHARM_SUBCLASS" VARCHAR2(254 BYTE)
+    );
 
 
     --------------------------------------------------------------------------------
@@ -146,9 +149,14 @@ FROM XDR_FORD_med;
 COMMIT;      
 
     --------------------------------------------------------------------------------
-    --	STEP 3.2.5: Apply Labs driver selection to final selection
+    --	STEP 3.2.5: Apply Meds driver selection to final selection
     --------------------------------------------------------------------------------   
-
+DROP TABLE xdr_FORD_med PURGE;
+CREATE TABLE xdr_FORD_med AS 
+SELECT DISTINCT med.*
+  FROM xdr_FORD_medall            med  
+  JOIN xdr_FORD_meddrv            drv  ON med.medication_id = drv.medication_id 
+;
 
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
@@ -223,7 +231,7 @@ SELECT 	DISTINCT coh.pat_id,
 
 
 --Add counts for QA
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,PAT_COUNT, TOTAL_COUNT, DESCRIPTION)
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
 SELECT 'xdr_FORD_laball' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
