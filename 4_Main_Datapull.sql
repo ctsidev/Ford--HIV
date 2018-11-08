@@ -431,7 +431,7 @@ CREATE TABLE xdr_FORD_prc
 	"PROC_NAME" VARCHAR2(254 BYTE), 
 	"PROC_CODE" VARCHAR2(254 BYTE), 
 	"CODE_TYPE" VARCHAR2(254 BYTE) 
-	-- "PROC_PERF_PROV_ID" VARCHAR2(20 BYTE)
+	 "PROC_PERF_PROV_ID" VARCHAR2(20 BYTE)
    );
 
     --------------------------------------------------------------------------------
@@ -443,8 +443,8 @@ SELECT distinct t.pat_id,
 		p.proc_date, 
 		i.procedure_name        as PROC_NAME, 
 		i.ref_bill_code         as PROC_CODE,
-		zhcs.name               as code_type
-		-- p.proc_perf_prov_id as prov_id
+		zhcs.name               as code_type,
+		p.proc_perf_prov_id as prov_id
 FROM clarity.hsp_acct_px_list p  
       JOIN clarity.cl_icd_px i ON p.final_icd_px_id = i.icd_px_id 
       JOIN XDR_FORD_ENC t ON p.hsp_account_id = t.hsp_account_id 
@@ -744,15 +744,18 @@ DROP TABLE xdr_FORD_prov PURGE;
 CREATE TABLE xdr_FORD_prov AS
 SELECT rownum as prov_study_id
         ,x.*
-FROM (SELECT DISTINCT prov.prov_id               AS provider_id,
-                prv.provider_type,
-                prv.primary_specialty,
-                CASE WHEN   ser.ACTIVE_STATUS = 'Active'  AND  emp.USER_STATUS_C = 1 THEN 1
+FROM (SELECT DISTINCT prov.prov_id               AS provider_id
+                ,prv.provider_type
+                ,prv.primary_specialty
+                ,CASE WHEN   ser.ACTIVE_STATUS = 'Active'  AND  emp.USER_STATUS_C = 1 THEN 1
                     ELSE NULL 
-                END active_providers,
-                CASE WHEN   emp.user_id IS NOT NULL THEN 1
+                END active_providers
+                ,CASE WHEN   emp.user_id IS NOT NULL THEN 1
                     ELSE NULL
                 END UC_provider
+                ,CASE WHEN hiv.PROVIDER_ID IS NOT NULL THEN 1
+                    ELSE 0
+                END HIV_PROVIDER
 FROM 
     (--All provider from encounters + procedures + patient PCP
     select visit_prov_id as prov_id from xdr_FORD_enc
@@ -760,11 +763,15 @@ FROM
     select PROC_PERF_PROV_ID as prov_id from xdr_FORD_prc
 	UNION
     select CUR_PCP_PROV_ID as prov_id from XDR_FORD_pat
+    UNION
+    SELECT PROVIDER_ID FROM XDR_FORD_PROVDRV
     ) prov
 LEFT JOIN clarity.v_cube_d_provider       prv   ON prov.prov_id = prv.provider_id
 --check for active providers
 LEFT JOIN clarity.clarity_ser                     ser ON prov.prov_id = ser.PROV_ID
 LEFT JOIN clarity.CLARITY_EMP                     emp ON prov.PROV_ID = emp.PROV_ID 
+LEFT JOIN XDR_FORD_PROVDRV                        hiv ON prov.PROV_ID = hiv.PROVIDER_ID 
+
 ) x
 ORDER BY  dbms_random.value
 ;
@@ -826,12 +833,10 @@ COMMIT;
            
 --------------------------------------------------------------------------------
 -- STEP 3.12: Create Appointments table
---------------------------------------------------------------------------------*****
+--------------------------------------------------------------------------------
 DROP TABLE XDR_FORD_APPT PURGE;
 CREATE TABLE xdr_FORD_appt AS
 SELECT DISTINCT coh.pat_id
-               ,coh.pat_mrn_id
-               ,coh.study_id
                ,vsa.pat_enc_csn_id
                ,vsa.appt_status_c
                ,vsa.appt_status_name    AS appt_status
@@ -866,6 +871,7 @@ SELECT DISTINCT coh.pat_id
   FROM xdr_FORD_coh                            coh
   JOIN v_sched_appt           vsa     ON coh.pat_id = vsa.pat_id
   LEFT JOIN clarity_prc       clprc   ON vsa.prc_id = clprc.prc_id
+  WHERE checkin_dttm BETWEEN '03/02/2013' AND '02/28/2018'
 ; 
 
 
@@ -877,4 +883,6 @@ SELECT 'XDR_FORD_APPT' AS TABLE_NAME
   ,'Create appointments table' AS DESCRIPTION  
 FROM XDR_FORD_APPT;
 COMMIT;
-                    
+
+
+-
