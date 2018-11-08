@@ -260,8 +260,10 @@ COMMIT;
 ----------------------------------------------------------------------------
 drop  table xdr_ford_pat purge;
 create table xdr_ford_pat as 
-SELECT rownum as study_id,
-	pat.* 
+SELECT 
+--    rownum as study_id,
+    i2b2.f_get_deid_new(1,pat.pat_id,105057) AS study_id --Change 0 to actual project_id
+	,pat.* 
 from
 	(select DISTINCT coh.pat_id
                         ,coh.FIRST_HIV_DX_DATE
@@ -342,6 +344,7 @@ from
 ORDER BY  dbms_random.value
 
 ;
+
 
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_PAT' AS TABLE_NAME
