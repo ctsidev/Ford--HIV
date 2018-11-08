@@ -430,8 +430,8 @@ CREATE TABLE xdr_FORD_prc
 	"PROC_DATE" DATE, 
 	"PROC_NAME" VARCHAR2(254 BYTE), 
 	"PROC_CODE" VARCHAR2(254 BYTE), 
-	"CODE_TYPE" VARCHAR2(254 BYTE), 
-	"PROC_PERF_PROV_ID" VARCHAR2(20 BYTE)
+	"CODE_TYPE" VARCHAR2(254 BYTE) 
+	-- "PROC_PERF_PROV_ID" VARCHAR2(20 BYTE)
    );
 
     --------------------------------------------------------------------------------
@@ -443,8 +443,8 @@ SELECT distinct t.pat_id,
 		p.proc_date, 
 		i.procedure_name        as PROC_NAME, 
 		i.ref_bill_code         as PROC_CODE,
-		zhcs.name               as code_type,
-		p.proc_perf_prov_id as prov_id
+		zhcs.name               as code_type
+		-- p.proc_perf_prov_id as prov_id
 FROM clarity.hsp_acct_px_list p  
       JOIN clarity.cl_icd_px i ON p.final_icd_px_id = i.icd_px_id 
       JOIN XDR_FORD_ENC t ON p.hsp_account_id = t.hsp_account_id 
@@ -608,24 +608,6 @@ SELECT DISTINCT coh.pat_id
                ,soc.sponge_yn
                ,soc.inserts_yn
                ,soc.abstinence_yn
-            --Get tobacco history below
-               ,soc.tobacco_pak_per_dy
-               ,soc.tobacco_used_years
-               ,xtb.NAME                                               AS tobacco_user
-               ,soc.cigarettes_yn
-               ,soc.pipes_yn 
-               ,soc.cigars_yn
-               ,soc.snuff_yn
-               ,soc.chew_yn 
-               ,xsm.NAME                                               AS smoking_tob_status
-               ,soc.smoking_start_date
-               ,soc.smoking_quit_date
-            --Get alcohol history below
-               ,soc.alcohol_comment                                    AS alcohol_comments 
-               ,xal.NAME                                               AS alcohol_user
-               ,soc.alcohol_oz_per_wk
-               ,xdt.NAME                                               AS alcohol_type
-               ,soa.alcohol_drinks_wk 
             --Get drug history below
                ,soc.iv_drug_user_yn 
                ,soc.illicit_drug_freq  
@@ -795,3 +777,104 @@ SELECT 'xdr_FORD_prov' AS TABLE_NAME
   ,'Create Providers Diagnosis table' AS DESCRIPTION  
 FROM xdr_FORD_prov;
 COMMIT;
+
+
+--------------------------------------------------------------------------------
+-- STEP 3.11: Create ADT table
+--------------------------------------------------------------------------------
+DROP TABLE XDR_FORD_ADT PURGE;
+CREATE TABLE xdr_FORD_adt AS
+select adt.pat_id,
+                adt.pat_enc_csn_id,
+               case when adt.event_type_c = 1 and adt.next_out_event_id = enc2.hsp_dis_event_id then 'Admit/Discharge'
+                  when adt.event_type_c = 1 then 'Admit'
+                  when adt.event_type_c = 3 and adt.next_out_event_id = enc2.hsp_dis_event_id then 'Discharge'
+                  else 'Transfer' end as event_type,
+               adt.event_id as in_event_id,
+               adt.department_id,
+               dept.department_name,
+               dept.dept_abbreviation,
+               dept.specialty     AS department_specialty,
+               dept.rev_loc_id,
+               loc.loc_name,
+               adt.effective_time as time_in,
+               adtout.effective_time as time_out,
+               adt.next_out_event_id as out_event_id,
+               --- adm_event_id and dis_event_id have been deprecated and replaced
+               ---  by the pat_enc_hsp2 fields (hsp_adm_event_id and hsp_dis_event_id)
+               enc2.hsp_adm_event_id as adm_event_id,
+               enc2.hsp_dis_event_id as dis_event_id
+          from clarity_adt adt
+          join i2b2.lz_clarity_patient pat on adt.pat_id = pat.pat_id
+          join i2b2.lz_clarity_enc enc on adt.pat_enc_csn_id = enc.pat_enc_csn_id
+          join pat_enc_hsp_2 enc2 on adt.pat_enc_csn_id = enc2.pat_enc_csn_id
+          left join clarity_adt adtout on adt.next_out_event_id = adtout.event_id
+          left join clarity_dep dept on adt.department_id = dept.department_id
+          left join clarity_loc loc on dept.rev_loc_id = loc.loc_id
+          where adt.event_type_c in (1,3) 
+           and adt.event_subtype_c != 2
+           and enc2.hsp_adm_event_id is not null;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_ADT' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT	
+	,COUNT(*) AS TOTAL_COUNT 		
+  ,'Create ADT table' AS DESCRIPTION  
+FROM XDR_FORD_ADT;
+COMMIT;
+           
+--------------------------------------------------------------------------------
+-- STEP 3.12: Create Appointments table
+--------------------------------------------------------------------------------*****
+DROP TABLE XDR_FORD_APPT PURGE;
+CREATE TABLE xdr_FORD_appt AS
+SELECT DISTINCT coh.pat_id
+               ,coh.pat_mrn_id
+               ,coh.study_id
+               ,vsa.pat_enc_csn_id
+               ,vsa.appt_status_c
+               ,vsa.appt_status_name    AS appt_status
+               ,vsa.appt_conf_stat_c
+               ,vsa.appt_conf_stat_name AS appt_confirmation_status 
+               ,vsa.appt_block_c
+               ,vsa.appt_block_name     AS appt_block
+               ,vsa.appt_dttm
+               ,vsa.appt_length
+               ,vsa.appt_made_dttm
+               ,vsa.prc_id              ----  This is the visit type !!!
+               ,clprc.record_type       AS prc_v_type
+               ,clprc.status            AS prc_v_type_status
+               ,clprc.prc_name          AS visit_type
+               ,vsa.checkin_dttm
+               ,vsa.checkout_dttm
+               ,vsa.cancel_reason_c
+               ,vsa.cancel_reason_name  AS cancel_reason
+               ,appt_serial_num
+               ,vsa.department_id
+               ,vsa.department_name
+               ,vsa.dept_specialty_c   
+               ,vsa.dept_specialty_name AS department_specialty
+               ,vsa.loc_id            
+               ,vsa.loc_name
+               ,vsa.center_c      
+               ,vsa.center_name
+               ,vsa.prov_id
+               ,vsa.prov_name_wid
+               ,vsa.referring_prov_id
+               ,vsa.referring_prov_name_wid
+  FROM xdr_FORD_coh                            coh
+  JOIN v_sched_appt           vsa     ON coh.pat_id = vsa.pat_id
+  LEFT JOIN clarity_prc       clprc   ON vsa.prc_id = clprc.prc_id
+; 
+
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_APPT' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT	
+	,COUNT(*) AS TOTAL_COUNT 		
+  ,'Create appointments table' AS DESCRIPTION  
+FROM XDR_FORD_APPT;
+COMMIT;
+                    
