@@ -59,6 +59,22 @@ FROM XDR_FORD_ENC;
 COMMIT;            
 
 
+--PRIMARY CARE ENCOUNTERS BASED ON ENCOUNTER TYPE AND HIV PROVIDER
+SELECT ENC.*
+FROM XDR_FORD_ENC               ENC
+JOIN XDR_FORD_PROVDRV           PROV ON ENC.VISIT_PROV_ID = PROV.PROVIDER_ID
+WHERE ENC.ENCOUNTER_TYPE in (
+'Evaluation'
+,'Follow-Up'
+,'Office Visit'
+,'Treatment'
+,'Canceled'
+,'Non-UCLA Hosp and Clinic Visits'
+,'Lab Visit'
+,'Telephone'
+,'myUCLAhealth Messaging'
+)
+;--1984 patients 26711 encounters
 --------------------------------------------------------------------------------
 --	STEP 3.3: Create Diagnoses table
 --------------------------------------------------------------------------------
@@ -756,23 +772,22 @@ FROM (SELECT DISTINCT prov.prov_id               AS provider_id
                 ,CASE WHEN hiv.PROVIDER_ID IS NOT NULL THEN 1
                     ELSE 0
                 END HIV_PROVIDER
-FROM 
-    (--All provider from encounters + procedures + patient PCP
-    select visit_prov_id as prov_id from xdr_FORD_enc
-    UNION
-    select PROC_PERF_PROV_ID as prov_id from xdr_FORD_prc
-	UNION
-    select CUR_PCP_PROV_ID as prov_id from XDR_FORD_pat
-    UNION
-    SELECT PROVIDER_ID FROM XDR_FORD_PROVDRV
-    ) prov
-LEFT JOIN clarity.v_cube_d_provider       prv   ON prov.prov_id = prv.provider_id
---check for active providers
-LEFT JOIN clarity.clarity_ser                     ser ON prov.prov_id = ser.PROV_ID
-LEFT JOIN clarity.CLARITY_EMP                     emp ON prov.PROV_ID = emp.PROV_ID 
-LEFT JOIN XDR_FORD_PROVDRV                        hiv ON prov.PROV_ID = hiv.PROVIDER_ID 
-
-) x
+    FROM 
+        (--All provider from encounters + procedures + patient PCP + HIV providers
+        select visit_prov_id as prov_id from xdr_FORD_enc
+        UNION
+        select PROC_PERF_PROV_ID as prov_id from xdr_FORD_prc
+        UNION
+        select CUR_PCP_PROV_ID as prov_id from XDR_FORD_pat
+        UNION
+        SELECT PROVIDER_ID FROM XDR_FORD_PROVDRV
+        ) prov
+    LEFT JOIN clarity.v_cube_d_provider       prv   ON prov.prov_id = prv.provider_id
+    LEFT JOIN XDR_FORD_PROVDRV                        hiv ON prov.PROV_ID = hiv.PROVIDER_ID 
+    --check for active providers
+    LEFT JOIN clarity.clarity_ser                     ser ON prov.prov_id = ser.PROV_ID
+    LEFT JOIN clarity.CLARITY_EMP                     emp ON prov.PROV_ID = emp.PROV_ID 
+    ) x
 ORDER BY  dbms_random.value
 ;
 
