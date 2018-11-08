@@ -260,28 +260,29 @@ COMMIT;
 ----------------------------------------------------------------------------
 drop  table xdr_ford_pat purge;
 create table xdr_ford_pat as 
-select DISTINCT coh.pat_id
-        ,coh.FIRST_HIV_DX_DATE
-        ,coh.FIRST_HIV_LAB_DATE
-        ,coh.COHORT_TYPE
-        
-        ,pat.BIRTH_DATE
-        ,pat.EMAIL_ADDRESS
-        ,pat.WORK_PHONE
-        ,pat.home_phone
-        ,pat.CUR_PCP_PROV_ID
-        ,pat.PAT_MRN_ID
-        ,pat.sex
-        ,pat.MARITAL_STATUS_C
-        ,zma.name as MARITAL_STATUS
-        ,pat.LANGUAGE_C
-        ,zla.name as language
-        
-        ,pat.ADD_LINE_1
-        ,pat.ADD_LINE_2
-        ,pat.CITY
-        ,pat.ZIP
-        ,CASE WHEN 
+SELECT rownum as study_id,
+	pat.* 
+from
+	(select DISTINCT coh.pat_id
+                        ,coh.FIRST_HIV_DX_DATE
+                        ,coh.FIRST_HIV_LAB_DATE
+                        ,coh.COHORT_TYPE                
+                        ,pat.BIRTH_DATE
+                        ,pat.EMAIL_ADDRESS
+                        ,pat.WORK_PHONE
+                        ,pat.home_phone
+                        ,pat.CUR_PCP_PROV_ID
+                        ,pat.PAT_MRN_ID
+                        ,pat.sex
+                        ,pat.MARITAL_STATUS_C
+                        ,zma.name as MARITAL_STATUS
+                        ,pat.LANGUAGE_C
+                        ,zla.name as language
+                        ,pat.ADD_LINE_1
+                        ,pat.ADD_LINE_2
+                        ,pat.CITY
+                        ,pat.ZIP
+                        ,CASE WHEN 
 						pat.ADD_LINE_1 is null
 						or
 						pat.ADD_LINE_1 IN (' ','.',',','0','00','000','0000')
@@ -311,13 +312,13 @@ select DISTINCT coh.pat_id
 						or
 						pat.CITY  IN (' ','.',',','0','00','000','0000')
 						or
-                        REGEXP_LIKE(pat.CITY,'(RETURN.MAIL|MAIL.RETURNED|BAD.ADDRESS|NO.CITY|UNKNOWN|#)','i')
-                        or
-						pat.ZIP IS NULL  
-                        OR 
-                        LENGTH(pat.ZIP) < 5
-                        OR
-                        REGEXP_LIKE(pat.ZIP,'###','i')
+                                    REGEXP_LIKE(pat.CITY,'(RETURN.MAIL|MAIL.RETURNED|BAD.ADDRESS|NO.CITY|UNKNOWN|#)','i')
+                                    or
+                                                pat.ZIP IS NULL  
+                                    OR 
+                                    LENGTH(pat.ZIP) < 5
+                                    OR
+                                    REGEXP_LIKE(pat.ZIP,'###','i')
 						OR--HOMELESS
 						UPPER(pat.CITY) = 'HOMELESS'
 						or--INVALID ADDRESSES
@@ -330,13 +331,16 @@ select DISTINCT coh.pat_id
 						UPPER(pat.CITY) LIKE '%#%' THEN 1
 					ELSE 0
 			END INCOMPLETE_ADDRESS        
-from XDR_FORD_COH                     coh
---left join i2b2.lz_clarity_patient     pat ON enc.pat_id =  pat.pat_id
-left join clarity.patient             pat ON coh.pat_id =  pat.pat_id
-left join clarity.ZC_EMPY_STAT        zem ON pat.EMPY_STATUS_C = zem.EMPY_STAT_C
-left join clarity.ZC_language        zla ON pat.language_c = zla.language_c
-left join clarity.ZC_marital_status        zma ON pat.MARITAL_STATUS_C = zma.MARITAL_STATUS_C
-LEFT JOIN clarity.zc_state xst ON pat.state_c = xst.state_c
+            from XDR_FORD_COH                     coh
+            --left join i2b2.lz_clarity_patient     pat ON enc.pat_id =  pat.pat_id
+            left join clarity.patient             pat ON coh.pat_id =  pat.pat_id
+            left join clarity.ZC_EMPY_STAT        zem ON pat.EMPY_STATUS_C = zem.EMPY_STAT_C
+            left join clarity.ZC_language        zla ON pat.language_c = zla.language_c
+            left join clarity.ZC_marital_status        zma ON pat.MARITAL_STATUS_C = zma.MARITAL_STATUS_C
+            LEFT JOIN clarity.zc_state xst ON pat.state_c = xst.state_c
+      ) pat 
+ORDER BY  dbms_random.value
+
 ;
 
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
