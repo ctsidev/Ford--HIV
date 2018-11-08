@@ -280,6 +280,12 @@ from
                         ,zma.name as MARITAL_STATUS
                         ,pat.LANGUAGE_C
                         ,zla.name as language
+                        ,sor.SEXUAL_ORIENTATN_C
+                        ,zso.name as SEXUAL_ORIENTATION
+                        ,p.gender_identity_c
+                        ,zgi.name as gender_ident
+                        ,pat.pat_status_c
+                        ,zps.name patient_status
                         ,pat.ADD_LINE_1
                         ,pat.ADD_LINE_2
                         ,pat.CITY
@@ -333,17 +339,23 @@ from
 						UPPER(pat.CITY) LIKE '%#%' THEN 1
 					ELSE 0
 			END INCOMPLETE_ADDRESS        
-            from XDR_FORD_COH                     coh
+            from XDR_FORD_COH                           coh
             --left join i2b2.lz_clarity_patient     pat ON enc.pat_id =  pat.pat_id
-            left join clarity.patient             pat ON coh.pat_id =  pat.pat_id
-            left join clarity.ZC_EMPY_STAT        zem ON pat.EMPY_STATUS_C = zem.EMPY_STAT_C
-            left join clarity.ZC_language        zla ON pat.language_c = zla.language_c
-            left join clarity.ZC_marital_status        zma ON pat.MARITAL_STATUS_C = zma.MARITAL_STATUS_C
-            LEFT JOIN clarity.zc_state xst ON pat.state_c = xst.state_c
+            left join clarity.patient                   pat ON coh.pat_id =  pat.pat_id
+            left join clarity.ZC_EMPY_STAT              zem ON pat.EMPY_STATUS_C = zem.EMPY_STAT_C
+            left join clarity.ZC_language               zla ON pat.language_c = zla.language_c
+            left join clarity.ZC_marital_status         zma ON pat.MARITAL_STATUS_C = zma.MARITAL_STATUS_C
+            LEFT JOIN clarity.zc_state                  xst ON pat.state_c = xst.state_c
+            left join CLARITY.PAT_SEXUAL_ORIENTATION    sor ON coh.pat_id = sor.pat_id
+            left join ZC_SEXUAL_ORIENTATION             zso ON sor.SEXUAL_ORIENTATN_C = zso.SEXUAL_ORIENTATION_C
+            LEFT JOIN zc_patient_status                 zps ON pat.pat_status_c = zps.patient_status_c
+            LEFT JOIN patient_4                         p  on coh.pat_id = p.pat_id
+            left join zc_gender_identity                zgi on p.gender_identity_c = zgi.gender_identity_c
       ) pat 
 ORDER BY  dbms_random.value
 
 ;
+
 
 
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
