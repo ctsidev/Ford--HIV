@@ -15,15 +15,8 @@
 DROP TABLE XDR_FORD_DX_HIV_coh PURGE;
 CREATE TABLE XDR_FORD_DX_HIV_coh AS
 SELECT pat_id
-,MIN(EFFECTIVE_DATE) AS FIRST_HIV_DATE
+,MIN(contact_date) AS FIRST_HIV_DATE
 FROM (
-        -- UCLA has legacy data
-        SELECT DISTINCT dx.pat_id
-               ,dx.EFFECTIVE_DATE
-        FROM i2b2.int_dx             dx
-        JOIN XDR_FORD_DXDRV         drv ON dx.dx_id = drv.dx_id AND drv.dx_flag = 'HIV' 
-        WHERE dx.EFFECTIVE_DATE BETWEEN '03/02/2013' AND '02/28/2018'
-        UNION
         SELECT DISTINCT dx.pat_id
                ,dx.contact_date
         FROM pat_enc_dx             dx
@@ -32,9 +25,8 @@ FROM (
     )
 GROUP BY pat_id;      --3160
 
--- SELECT COUNT(*),COUNT(PAT_ID) FROM XDR_FORD_PAT_HIV;--5866(10/04/18)        5782	5782
---Add counts for QA
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT, TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_DX_HIV_coh' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
@@ -42,9 +34,6 @@ SELECT 'XDR_FORD_DX_HIV_coh' AS TABLE_NAME
 FROM XDR_FORD_DX_HIV_coh;
 COMMIT;
 
-
--- PULL HIV LAS AND APPLY LOGIC
--- MERGE PATIENTS FROM HIV DX ONLY, HIV LAB ONLY, AND HIV DX + HIV LAB,
 
 ----------------------------------------------------------------------------
 --Step 2.2:     Pull Labs based on lab driver LOINC codes
@@ -101,6 +90,7 @@ SELECT 	DISTINCT coh.pat_id,
               JOIN clarity_component       cc  ON o.component_id = cc.component_id
               LEFT JOIN lnc_db_main        ldm ON CC.DEFAULT_LNC_ID = ldm.record_id 
               join XDR_FORD_labDRV         drv ON coalesce(ldm.lnc_code, cc.loinc_code)  = drv.BIP_LOINC_MAPPING
+            --   join XDR_FORD_labDRV         drv ON p.proc_id = drv.proc_id and o.component_id = drv.component_id
               where 
                       p.order_type_c in (7)--, 26, 62, 63)			--double check this codes
                       --and p.ordering_date between to_date('03/01/2013','mm/dd/yyyy') and to_date('05/08/2018','mm/dd/yyyy')
@@ -197,8 +187,6 @@ UNION
                 step = '1'
                 AND LAB_FLAG = 1 --600 (702)
 ;
-commit;
-SELECT COUNT(*), COUNT(DISTINCT PAT_ID)  FROM  xdr_FORD_lab_HIV_COH;  --7965	2933(10/29/18)      989(10/29/2018)     2468(10/04/2018)            1616(4/7/17)
 
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
 SELECT 'xdr_FORD_lab_HIV_COH' AS TABLE_NAME
@@ -207,10 +195,6 @@ SELECT 'xdr_FORD_lab_HIV_COH' AS TABLE_NAME
     ,'Counts for HIV labs where results were harmonized' AS DESCRIPTION
 FROM xdr_FORD_lab_HIV_COH;
 COMMIT;
-
-
-
-
 
 
 ----------------------------------------------------------------------------
@@ -223,8 +207,6 @@ PAT_ID VARCHAR2(8 BYTE)
 ,first_hiv_lab_date DATE
 ,COHORT_TYPE VARCHAR2(50 BYTE)
 );
-TRUNCATE TABLE XDR_FORD_COH;
-COMMIT;
 
 
 ----------------------------------------------------------------------------
@@ -232,7 +214,7 @@ COMMIT;
 ----------------------------------------------------------------------------
 INSERT INTO XDR_FORD_COH(PAT_ID, first_hiv_dx_date,COHORT_TYPE,first_hiv_lab_date)
 select DISTINCT dx.pat_id
-        ,dx.HIV_DX_DATE as first_hiv_dx_date
+        ,dx.FIRST_HIV_DATE as first_hiv_dx_date
         ,CASE WHEN lab.pat_id is null then 'ONLY DX' 
                 else 'DX + LAB'
                 END COHORT_TYPE
@@ -246,7 +228,7 @@ LEFT JOIN (select pat_id
 COMMIT;
 
 ----------------------------------------------------------------------------
---Step 2.6:     Insert patients with HIV labs
+--Step 2.7:     Insert patients with HIV labs
 ----------------------------------------------------------------------------
 INSERT INTO XDR_FORD_COH(PAT_ID, COHORT_TYPE, first_hiv_lab_date)
 select lab.pat_id
@@ -272,10 +254,10 @@ FROM (
 );
 COMMIT;
 
--- *******************************************************************************************************
--- STEP 3
+----------------------------------------------------------------------------
+-- STEP 2.8
 --   Create the Patient table
--- *******************************************************************************************************
+----------------------------------------------------------------------------
 drop  table xdr_ford_pat purge;
 create table xdr_ford_pat as 
 select DISTINCT coh.pat_id
@@ -370,7 +352,8 @@ FROM (
 );
 COMMIT;
 ------------------------------------------------------
---race and ethnicity
+--    Step: 2.9 Race and ethnicity
+--
 ------------------------------------------------------
 drop  table xdr_ford_pat_race purge;
 create table xdr_ford_pat_race as 
