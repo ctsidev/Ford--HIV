@@ -206,13 +206,13 @@ COMMIT;
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_LABDRV' AS TABLE_NAME
         ,TOTAL_COUNT
-        ,'Load HIV labs support file for ' + LAB_FLAG AS DESCRIPTION
+        ,'Load HIV labs support file for STEP ' || STEP AS DESCRIPTION
 FROM (
         SELECT 
-            LAB_FLAG
+            STEP
             ,COUNT(*) AS TOTAL_COUNT
         FROM XDR_FORD_LABDRV
-        GROUP BY LAB_FLAG
+        GROUP BY STEP
 );
 COMMIT;
 
