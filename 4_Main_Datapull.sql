@@ -47,8 +47,9 @@ SELECT DISTINCT e.pat_id,
         LEFT JOIN clarity.clarity_dep       dep 	ON e.department_id = dep.department_id
         left join clarity.clarity_loc       loc     ON dep.rev_loc_id = loc.loc_id
         left join clarity.clarity_PRC       prc     ON e.APPT_PRC_ID = prc.PRC_ID
-        WHERE e.enc_type_c not in (2532, 2534, 40, 2514, 2505, 2506, 2512, 2507)
-			AND e.effective_date_dt BETWEEN '03/02/2013' AND '02/28/2018';
+        WHERE 
+        -- e.enc_type_c not in (2532, 2534, 40, 2514, 2505, 2506, 2512, 2507) AND  --not worthy on other sites
+			   e.effective_date_dt BETWEEN '03/02/2013' AND '02/28/2018';
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
 SELECT 'XDR_FORD_ENC' AS TABLE_NAME
@@ -60,20 +61,20 @@ COMMIT;
 
 
 --PRIMARY CARE ENCOUNTERS BASED ON ENCOUNTER TYPE AND HIV PROVIDER
-SELECT ENC.*
-FROM XDR_FORD_ENC               ENC
-JOIN XDR_FORD_PROVDRV           PROV ON ENC.VISIT_PROV_ID = PROV.PROVIDER_ID
-WHERE ENC.ENCOUNTER_TYPE in (
-'Evaluation'
-,'Follow-Up'
-,'Office Visit'
-,'Treatment'
-,'Canceled'
-,'Non-UCLA Hosp and Clinic Visits'
-,'Lab Visit'
-,'Telephone'
-,'myUCLAhealth Messaging'
-)
+-- SELECT ENC.*
+-- FROM XDR_FORD_ENC               ENC
+-- JOIN XDR_FORD_PROVDRV           PROV ON ENC.VISIT_PROV_ID = PROV.PROVIDER_ID
+-- WHERE ENC.ENCOUNTER_TYPE in (
+-- 'Evaluation'
+-- ,'Follow-Up'
+-- ,'Office Visit'
+-- ,'Treatment'
+-- ,'Canceled'
+-- ,'Non-UCLA Hosp and Clinic Visits'
+-- ,'Lab Visit'
+-- ,'Telephone'
+-- ,'myUCLAhealth Messaging'
+-- )
 ;--1984 patients 26711 encounters
 --------------------------------------------------------------------------------
 --	STEP 3.3: Create Diagnoses table
@@ -545,7 +546,7 @@ COMMIT;
 --------------------------------------------------------------------------------
 --		Codes for common flowsheets might differ among sites. Please confirm for: 
 /*
-				     '11'         --Height
+				                             '11'         --Height
                                     ,'14'         --Weight
                                     ,'5'          --Blood Pressure  
                                     ,'8'          --Pulse
@@ -649,33 +650,6 @@ SELECT 'XDR_FORD_SOC' AS TABLE_NAME
   ,'Create social history table' AS DESCRIPTION
 FROM XDR_FORD_SOC;
 COMMIT;
---------------------------------------------------------------------------------
--- STEP 3.7: Create Family History table
---------------------------------------------------------------------------------
-DROP TABLE xdr_FORD_fam PURGE;
-CREATE TABLE xdr_FORD_fam AS
-SELECT DISTINCT pat.pat_id 
-               ,fam.pat_enc_csn_id       
-               ,fam.line
-               ,fam.medical_hx_c
-               ,xmh.NAME                  AS medical_hx
-               ,fam.relation_c
-               ,xrc.NAME                  AS relation
-  FROM XDR_FORD_PAT              pat
-  JOIN clarity.family_hx                fam ON pat.pat_id = fam.pat_id
-  LEFT JOIN clarity.zc_medical_hx       xmh ON fam.medical_hx_c = xmh.medical_hx_c
-  LEFT JOIN clarity.zc_msg_caller_rel   xrc ON fam.relation_c = xrc.msg_caller_rel_c 
-  WHERE fam.pat_enc_date_real = (SELECT MAX(fam.pat_enc_date_real) FROM clarity.family_hx fam WHERE fam.pat_id = pat.pat_id)
-;
-
---Add counts for QA
-INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
-SELECT 'XDR_FORD_FAM' AS TABLE_NAME
-	,COUNT(distinct pat_id) AS PAT_COUNT 
-	,COUNT(*) AS TOTAL_COUNT 		
-  ,'Create family history table' AS DESCRIPTION
-FROM XDR_FORD_FAM;
-COMMIT;
 
 
 
@@ -689,13 +663,18 @@ SELECT DISTINCT enc.pat_id
                ,enc.effective_date_dt as encounter_date
                ,pl.problem_list_id
                ,pl.dx_id
+               ,pl.description                AS prob_desc 
                ,pl.noted_date                 AS noted_date
                ,pl.date_of_entry              AS update_date
                ,pl.resolved_date              AS resolved_date
                ,zps.name                      AS problem_status        
+               ,pl.problem_cmt                AS problem_cmt     
                ,zhp.name                      AS priority
+               ,pl.hospital_pl_yn             AS hospital_problem
                ,PL.PRINCIPAL_PL_YN            AS principal_yn
-               ,pl.chronic_yn                 AS chronic_yn
+               ,ser.prov_id                           
+               ,ser.prov_type          
+               ,prv.primary_specialty
   FROM xdr_FORD_enc                  enc
   JOIN clarity.problem_list                 pl    ON enc.pat_enc_csn_id = pl.problem_ept_csn AND rec_archived_yn = 'N'
   LEFT JOIN clarity.clarity_ser             ser   ON pl.entry_user_id = ser.user_id
@@ -705,9 +684,10 @@ SELECT DISTINCT enc.pat_id
   WHERE
 		pl.noted_date BETWEEN '03/02/2013' AND '02/28/2018'; 
 
+
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
-SELECT 'xdr_FORD_pl' AS TABLE_NAME
+SELECT 'XDR_FORD_PL' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT	        --30855
 	,COUNT(*) AS TOTAL_COUNT 		                --301122
   ,'Create Problem list table' AS DESCRIPTION
@@ -746,7 +726,7 @@ FROM xdr_FORD_pl               pl
 
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
-SELECT 'xdr_FORD_pldx' AS TABLE_NAME
+SELECT 'XDR_FORD_PLDX' AS TABLE_NAME
 	,COUNT(distinct pat_id) AS PAT_COUNT
 	,COUNT(*) AS TOTAL_COUNT
   ,'Create Problem list Diagnosis table' AS DESCRIPTION  
@@ -763,6 +743,7 @@ SELECT rownum as prov_study_id
 FROM (SELECT DISTINCT prov.prov_id               AS provider_id
                 ,prv.provider_type
                 ,prv.primary_specialty
+                ,PRV.PROVIDER_NAME
                 ,CASE WHEN   ser.ACTIVE_STATUS = 'Active'  AND  emp.USER_STATUS_C = 1 THEN 1
                     ELSE NULL 
                 END active_providers
@@ -781,6 +762,8 @@ FROM (SELECT DISTINCT prov.prov_id               AS provider_id
         select CUR_PCP_PROV_ID as prov_id from XDR_FORD_pat
         UNION
         SELECT PROVIDER_ID FROM XDR_FORD_PROVDRV
+        UNION
+        SELECT PROV_ID FROM XDR_FORD_PROVDRVxdr_FORD_pl
         ) prov
     LEFT JOIN clarity.v_cube_d_provider       prv   ON prov.prov_id = prv.provider_id
     LEFT JOIN XDR_FORD_PROVDRV                        hiv ON prov.PROV_ID = hiv.PROVIDER_ID 
@@ -835,7 +818,8 @@ select adt.pat_id,
           left join clarity_loc loc on dept.rev_loc_id = loc.loc_id
           where adt.event_type_c in (1,3) 
            and adt.event_subtype_c != 2
-           and enc2.hsp_adm_event_id is not null;
+           and enc2.hsp_adm_event_id is not null
+           AND adt.effective_time  BETWEEN '03/02/2013' and '02/28/2018';
 
 --Add counts for QA
 INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
@@ -900,4 +884,285 @@ FROM XDR_FORD_APPT;
 COMMIT;
 
 
--
+--------------------------------------------------------------------------------
+-- STEP 3.13: Create Family History table
+--------------------------------------------------------------------------------
+DROP TABLE xdr_FORD_fam PURGE;
+CREATE TABLE xdr_FORD_fam AS
+SELECT DISTINCT pat.pat_id 
+               ,pat.study_id
+               ,fam.pat_enc_csn_id       
+               ,fam.line
+               ,fam.medical_hx_c
+               ,xmh.NAME                  AS medical_hx
+               ,fam.relation_c
+               ,xrc.NAME                  AS relation
+  FROM xdr_FORD_PAT              pat
+  JOIN clarity.family_hx                fam ON pat.pat_id = fam.pat_id
+  LEFT JOIN clarity.zc_medical_hx       xmh ON fam.medical_hx_c = xmh.medical_hx_c
+  LEFT JOIN clarity.zc_msg_caller_rel   xrc ON fam.relation_c = xrc.msg_caller_rel_c 
+  WHERE fam.pat_enc_date_real = (SELECT MAX(fam.pat_enc_date_real) FROM clarity.family_hx fam WHERE fam.pat_id = pat.pat_id)
+;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_fam' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT	
+	,COUNT(*) AS TOTAL_COUNT 		
+  ,'Create appointments table' AS DESCRIPTION  
+FROM xdr_FORD_fam;
+COMMIT;
+
+
+-- *******************************************************************************************************
+-- STEP 
+--   Create the Orders Procedure table and initial investigator order procedures review table
+--   Prerequisite(s): PatientDemographics.sql, Encounter.sql (Decide whether to link by pat_id or csn)
+
+--   (11/09/17) When pulling "Outpatient Referral" (i. e. colonoscopy), order_type_c= 8 is the filter to use. 
+--   Additionally, you might need to alter the order_status_c from "5" (completed) to "2" (sent) 
+--   and even "4" (cancelled), depending on the investigator request.
+--   See also optional filds to pull when working with referrals
+-- *******************************************************************************************************
+DROP TABLE xdr_FORD_opr PURGE;
+CREATE TABLE xdr_FORD_opr AS
+SELECT DISTINCT pat.pat_id
+               ,opr.PAT_ENC_CSN_ID
+               ,opr.order_proc_id
+               ,opr.proc_id
+               ,opr.description           
+               ,eap.proc_name
+               ,opr.proc_code
+               ,opr.order_time
+               ,opr.result_time
+               ,opr.order_type_c
+               ,xot.NAME                  AS order_type
+               ,opr.abnormal_yn
+               ,opr.order_status_c
+               ,opr.radiology_status_c
+               ,opr.specimen_source_c
+               ,opr.specimen_type_c
+               ,acc.acc_num
+               ,xpt.NAME                  AS specimen_type
+               ,res.line
+               ,res.ord_value
+               ,res.component_id
+               ,cmp.NAME                  AS component_name
+               ,res.component_comment
+               ,res.result_time           AS res_result_time
+               ,res.result_val_start_ln
+               ,res.result_val_end_ln
+               ,res.result_cmt_start_ln
+               ,res.result_cmt_end_ln
+               ,res.lrr_based_organ_id
+  FROM xdr_FORD_coh                              pat
+  JOIN order_proc               opr ON pat.pat_id = opr.pat_id
+  LEFT JOIN order_results       res ON opr.order_proc_id = res.order_proc_id
+  LEFT JOIN order_rad_acc_num   acc ON opr.order_proc_id = acc.order_proc_id
+  LEFT JOIN clarity_eap         eap ON opr.proc_id = eap.proc_id
+  LEFT JOIN clarity_component	  cmp	ON res.component_id = cmp.component_id
+  LEFT JOIN zc_order_type       xot ON opr.order_type_c = xot.order_type_c 
+  LEFT JOIN zc_specimen_type    xpt ON opr.specimen_type_c = xpt.specimen_type_c
+  WHERE opr.order_status_c = 5                    				--Completed
+    -- for referrals, see comments above for  order_status_c IN (2,4)
+    --AND opr.order_type_c NOT IN (7,26,62,63)                                    --Not labs 		--not really necessary when a selection is made in the following lines
+    AND (
+        (opr.order_type_c IN (5,1003) OR opr.radiology_status_c = 99)           --Imaging
+        OR (opr.order_type_c = 3)                                                  --Microbiology
+        OR (opr.order_type_c = 59)                                                 --Pathology
+        )
+    --AND (opr.order_type_c = 8)						  --Outpatient Referral 
+  AND res.result_time BETWEEN '03/02/2013' and '02/28/2018'
+  ;
+
+
+
+
+SELECT description, proc_name, proc_code, count(*)
+FROM xdr_FORD_opr
+GROUP BY  description, proc_name, proc_code;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_OPR' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+	,COUNT(*) AS TOTAL_COUNT
+  ,'Create orders table' AS DESCRIPTION  
+FROM XDR_FORD_OPR;
+COMMIT;
+
+
+-- *******************************************************************************************************
+-- STEP 
+--   Extract Microbiology Report by Patient Procedure
+--   Prerequisite(s): OrderProcedures.sql
+--
+--   04/06/2016 - Modified by Rob to eliminate duplicates and separate sensitivity reporting
+-- *******************************************************************************************************
+DROP TABLE XDR_FORD_MIC PURGE;
+CREATE TABLE XDR_FORD_MIC AS
+SELECT 1                    AS micro_sorting
+              ,rcc.order_id         AS micro_order_id
+              ,rcc.line_comp        AS micro_line
+              ,rcc.results_comp_cmt AS micro_results_cmt
+              ,rcc.line_comment     AS micro_line_comment
+          FROM xdr_FORD_opr                              prc
+          LEFT JOIN order_res_comp_cmt  rcc ON prc.order_proc_id = rcc.order_id
+		  WHERE prc.order_type_c = 3                                            --3=Microbiology
+          AND trim(rcc.results_comp_cmt) IS NOT NULL
+        UNION
+        SELECT 2                    AS micro_sorting
+              ,rcc.order_id         AS micro_order_id
+              ,rcc.line             AS micro_line
+              ,rcc.results_cmt      AS micro_results_cmt
+              ,rcc.line_comment     AS micro_line_comment
+          FROM xdr_FORD_opr                              prc
+          LEFT JOIN order_res_comment   rcc ON prc.order_proc_id = rcc.order_id
+		  WHERE prc.order_type_c = 3                                            --3=Microbiology
+          AND trim(rcc.results_cmt) IS NOT NULL
+;
+CREATE INDEX xdr_FORD_mic_ordidx ON xdr_FORD_mic (micro_order_id) nologging;
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT ,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_MIC' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+	,COUNT(*) AS TOTAL_COUNT
+  ,'Create Microbiology orders table' AS DESCRIPTION  
+FROM XDR_FORD_MIC;
+COMMIT;
+
+--------------------------------------------------------------------------------
+-- Pull additional fields, if required for sensitivity 
+--  Keep this separate from the details or we will get duplicates.
+--------------------------------------------------------------------------------
+DROP TABLE XDR_FORD_MIC2 PURGE;
+CREATE TABLE xdr_FORD_mic2 AS
+SELECT DISTINCT prc.MICRO_ORDER_ID           AS order_proc_id
+               ,org.name                    AS organism_name
+               ,xsc.name                    AS susceptibility
+               ,sns.sensitivity_value       AS sensitivity
+               ,xab.name                    AS antibiotic
+               ,sns.line
+  FROM xdr_FORD_mic			prc
+  JOIN clarity.order_sensitivity        sns ON prc.micro_order_id = sns.order_proc_id
+  LEFT JOIN clarity.zc_suscept          xsc ON sns.suscept_c = xsc.suscept_c
+  LEFT JOIN clarity.zc_antibiotic       xab ON sns.antibiotic_c = xab.antibiotic_c
+  LEFT JOIN clarity.clarity_organism	org ON sns.organism_id = org.organism_id
+;
+CREATE INDEX xdr_FORD_mic2_ordidx ON xdr_FORD_mic2 (order_proc_id) nologging;
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME, TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_MIC2' AS TABLE_NAME
+	,COUNT(*) AS TOTAL_COUNT
+  ,'Create Microbiology orders table (sensitivity/susceptibility)' AS DESCRIPTION  
+FROM XDR_FORD_MIC2;
+COMMIT;
+
+
+-- *******************************************************************************************************
+-- STEP 
+--   Extract Pathology Report by Patient Procedure
+--   Prerequisite(s): OrderProcedures.sql
+-- *******************************************************************************************************
+DROP TABLE xdr_FORD_path PURGE;
+CREATE TABLE xdr_FORD_path AS
+SELECT 1                    AS path_sorting
+              ,rcc.order_id         AS path_order_id
+              ,rcc.line_comp        AS path_line
+              ,rcc.results_comp_cmt AS path_results_cmt
+              ,rcc.line_comment     AS path_line_comment
+--              ,prc.*
+          FROM xdr_FORD_opr                              prc
+          LEFT JOIN order_res_comp_cmt  rcc ON prc.order_proc_id = rcc.order_id
+          WHERE prc.order_type_c = 59                                           --59=Pathology
+          AND trim(rcc.results_comp_cmt) is not null
+        UNION
+        SELECT 2                    AS path_sorting
+              ,rcc.order_id         AS path_order_id
+              ,rcc.line             AS path_line
+              ,rcc.results_cmt      AS path_results_cmt
+              ,rcc.line_comment     AS path_line_comment
+--              ,prc.*
+          FROM xdr_FORD_opr                              prc
+          LEFT JOIN order_res_comment   rcc ON prc.order_proc_id = rcc.order_id
+          WHERE prc.order_type_c = 59                                           --59=Pathology
+          AND trim(rcc.results_cmt) is not null
+;
+CREATE INDEX xdr_FORD_path_ordidx ON xdr_FORD_path (path_order_id) nologging;
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME, TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_path' AS TABLE_NAME
+	,COUNT(*) AS TOTAL_COUNT
+  ,'Create Pathology table' AS DESCRIPTION  
+FROM xdr_FORD_path;
+COMMIT;
+
+-- *******************************************************************************************************
+-- STEP 
+--   Extract Imaging reports
+--   Prerequisite(s): OrderProcedures.sql
+-- *******************************************************************************************************
+DROP TABLE xdr_FORD_img PURGE; 
+CREATE TABLE xdr_FORD_img AS
+SELECT DISTINCT opr.*
+  FROM xdr_FORD_opr                    opr
+  WHERE opr.radiology_status_c = 99                                             --Final results
+;
+CREATE INDEX xdr_FORD_img_patidx ON xdr_FORD_img (pat_id) nologging;
+CREATE INDEX xdr_FORD_img_opridx ON xdr_FORD_img (order_proc_id) nologging;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT, TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_img' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+    ,COUNT(*) AS TOTAL_COUNT
+  ,'Create Imaging table' AS DESCRIPTION  
+FROM xdr_FORD_img;
+COMMIT;
+--------------------------------------------------------------------------------
+-- Pull Imaging Narratives -----------------------------------------------------
+--------------------------------------------------------------------------------
+DROP TABLE xdr_FORD_imgnar PURGE;
+CREATE TABLE xdr_FORD_imgnar AS
+SELECT DISTINCT opr.pat_id
+               ,opr.acc_num
+               ,opr.order_proc_id
+               ,nar.line           AS narr_line
+               ,nar.narrative      AS narr_narrative
+  FROM xdr_FORD_img                      opr
+  JOIN order_narrative  nar ON opr.order_proc_id = nar.order_proc_id
+  WHERE trim(nar.narrative) IS NOT NULL;
+CREATE INDEX xdr_FORD_imgnar_patidx ON xdr_FORD_imgnar (pat_id) nologging nologging;
+CREATE INDEX xdr_FORD_imgnar_opridx ON xdr_FORD_imgnar (order_proc_id) nologging;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME, PAT_COUNT, TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_imgnar' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+    ,COUNT(*) AS TOTAL_COUNT
+  ,'Create Imaging narrative table' AS DESCRIPTION  
+FROM xdr_FORD_imgnar;
+COMMIT;
+--------------------------------------------------------------------------------
+-- Pull Imaging Impressions ----------------------------------------------------
+--------------------------------------------------------------------------------
+DROP TABLE xdr_FORD_imgimp PURGE;
+CREATE TABLE xdr_FORD_imgimp AS
+SELECT DISTINCT opr.pat_id
+               ,opr.acc_num
+               ,opr.order_proc_id
+               ,imp.line           AS impr_line
+               ,imp.impression     AS impr_impression
+  FROM xdr_FORD_img                      opr
+  JOIN order_impression imp ON opr.order_proc_id = imp.order_proc_id
+  WHERE trim(imp.impression) IS NOT NULL;
+CREATE INDEX xdr_FORD_imgimp_patidx ON xdr_FORD_imgimp (pat_id) nologging;
+
+--Add counts for QA
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME, PAT_COUNT, TOTAL_COUNT, DESCRIPTION)
+SELECT 'xdr_FORD_imgimp' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+    ,COUNT(*) AS TOTAL_COUNT
+  ,'Create Imaging impressions table' AS DESCRIPTION  
+FROM xdr_FORD_imgimp;
+COMMIT;
