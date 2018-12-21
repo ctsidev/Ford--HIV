@@ -82,7 +82,7 @@ LEFT JOIN clarity.clarity_medication    cm ON med1.used_med_id = cm.medication_i
 left join clarity.zc_pharm_class        zpc ON cm.pharm_class_c = zpc.pharm_class_c
 left join clarity.zc_thera_class        ztc ON cm.thera_class_c = ztc.thera_class_c
 left join clarity.zc_pharm_subclass     zsc ON cm.pharm_subclass_c = zsc.pharm_subclass_c
-WHERE med1.ORDER_START_TIME between to_date('03/02/2006','mm/dd/yyyy') and to_date('02/28/2018','mm/dd/yyyy') 
+WHERE med1.ORDER_START_TIME between to_date('03/02/2013','mm/dd/yyyy') and to_date('02/28/2018','mm/dd/yyyy') 
 ;
 
 
