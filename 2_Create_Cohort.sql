@@ -118,13 +118,13 @@ lab.*,
        --lab.PAT_MRN_ID,
         CASE WHEN 
                   (REGEXP_LIKE (lab.ord_value, 'NO','i')  ---  NON and NONE are redundant since they both contain NO already.
-                  AND  REGEXP_LIKE (lab.ord_value,'REA(C|V)(I|T)','i') ) --- You can roll these up into just one statement.  It will look for REA followed by a C or a V followed by a I or a T.
+                  AND  REGEXP_LIKE (lab.ord_value,'REA(C|V)(I|T)','i') ) --- It will look for REA followed by a C or a V followed by a I or a T.
                           OR REGEXP_LIKE (lab.ord_value, 'NR','i')
                           OR REGEXP_LIKE (lab.ord_value, 'N/R','i')
                           OR REGEXP_LIKE (lab.ord_value, 'NEG','i') 
                   THEN 0
             WHEN UPPER(lab.ord_value) LIKE 'REACTIVE' 
-                  OR REGEXP_LIKE (lab.ord_value, 'LY REACTIVE','i')                      --- This will cover the next three lines.
+                  OR REGEXP_LIKE (lab.ord_value, 'LY REACTIVE','i')  
                   OR REGEXP_LIKE (lab.ord_value, 'POSITIVE','i') 
                   OR UPPER(TRIM(lab.ord_value)) = 'DETECTED'
                       THEN 1            
@@ -147,7 +147,7 @@ WHERE
       step = '2'
       AND RES.LAB_FLAG = 1
 UNION
---i.    Amplicor, RealTime TaqMan V1, Taqman V2 HIV RNA >200 HIV mRNA copies/mL (in your list proc_id=107691); 
+--i.    Amplicor, RealTime TaqMan V1, Taqman V2 HIV RNA >200 HIV mRNA copies/mL 
           SELECT --171
                 distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res RES
@@ -155,7 +155,7 @@ UNION
                 step = '1A'
                 AND (harm_num_val <> 9999999  AND harm_num_val >  200)--692
 UNION
---ii, COBAS® AmpliPrep/COBAS TaqMan® HIV-1 (qPCR for HIV RNA) range is 20–10,000,000 HIV-1 RNA copies/mL (1.30-7.00 log copies/mL), so value >20 would be a positive (is this: 107665), 
+--ii, COBAS® AmpliPrep/COBAS TaqMan® HIV-1 (qPCR for HIV RNA) range is 20–10,000,000 HIV-1 RNA copies/mL (1.30-7.00 log copies/mL), so value >20 would be a positive
           SELECT --434
                 distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res     RES
@@ -163,7 +163,7 @@ UNION
                 step = '1B'
                 AND ((harm_num_val <> 9999999  AND harm_num_val >  20))  --OR (REGEXP_LIKE (ORD_VALUE,'>(100|75)','i')))  --new addition  --for future dev it needs to strip numeric value and work for all
 UNION
---iii, quantitative HIV PCR (107683) 
+--iii, quantitative HIV PCR
           SELECT --45
                 distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res    RES
@@ -171,7 +171,7 @@ UNION
                 step = '1C'
                 AND ORD_VALUE = 'DETECTED'
 UNION
---iv, positive p24 (107673)
+--iv, positive p24
           SELECT --3
                 distinct RES.pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res   RES   
@@ -179,7 +179,7 @@ UNION
                 step = '1D'
                 AND LAB_FLAG = 1
 UNION
---western blot (107639); 
+--western blot 
           SELECT --702
                 distinct pat_id, RESULT_DATE
           FROM XDR_FORD_HIVlab_res     RES
@@ -254,8 +254,34 @@ FROM (
 );
 COMMIT;
 
+
 ----------------------------------------------------------------------------
--- STEP 2.8
+--Step 2.8:     Removed Restricted patients
+
+----------------------------------------------------------------------------
+delete from XDR_FORD_COH 
+where pat_id in 
+                (
+                select distinct coh.pat_id 
+                from XDR_FORD_COH      coh
+                LEFT JOIN patient_fyi_flags            flags on coh.pat_id = flags.patient_id
+                LEFT JOIN patient_3                          on coh.pat_id = patient_3.pat_id
+                WHERE
+                            (patient_3.is_test_pat_yn = 'Y'
+                            OR flags.PAT_FLAG_TYPE_C in (6,8,9,1018,1053))
+            );
+commit;
+
+INSERT INTO XDR_FORD_COUNTS(TABLE_NAME,PAT_COUNT,TOTAL_COUNT, DESCRIPTION)
+SELECT 'XDR_FORD_COH' AS TABLE_NAME
+	,COUNT(distinct pat_id) AS PAT_COUNT
+        ,COUNT(*) AS TOTAL_COUNT
+        ,'Patients left after removing restricted ones'
+FROM XDR_FORD_COH;
+COMMIT;
+
+----------------------------------------------------------------------------
+-- STEP 2.9
 --   Create the Patient table
 ----------------------------------------------------------------------------
 drop  table xdr_ford_pat purge;
@@ -351,9 +377,11 @@ from
             LEFT JOIN zc_patient_status                 zps ON pat.pat_status_c = zps.patient_status_c
             LEFT JOIN patient_4                         p  on coh.pat_id = p.pat_id
             left join zc_gender_identity                zgi on p.gender_identity_c = zgi.gender_identity_c
+            WHERE
+                        TRUNC(MONTHS_BETWEEN(sysdate,pat.birth_date)/12) >= 18
+
       ) pat 
 ORDER BY  dbms_random.value
-
 ;
 
 
@@ -371,7 +399,7 @@ FROM (
 );
 COMMIT;
 ------------------------------------------------------
---    Step: 2.9 Race and ethnicity
+--    Step: 2.10 Race and ethnicity
 --
 ------------------------------------------------------
 drop  table xdr_ford_pat_race purge;
@@ -411,7 +439,7 @@ SELECT 'XDR_FORD_PAT_ETHNICITY' AS TABLE_NAME
 FROM  xdr_ford_pat_ethnicity;
 COMMIT;
 ------------------------------------------------------
---Geolocators (ONLY UCLA)
+-- Step: 2.11 Geolocators (ONLY UCLA)
 ------------------------------------------------------
 drop  table XDR_FORD_PAT_GEO purge;
 create table xdr_ford_pat_geo as 
