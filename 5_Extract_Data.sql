@@ -70,8 +70,15 @@ JOIN patient                                pat2 ON coh.pat_id = pat2.pat_id
 --------------------------------------------------------------------------------
 
 SELECT DISTINCT coh.study_id
-               ,CASE WHEN TRUNC(MONTHS_BETWEEN('08/01/2018',coh.birth_date)/12) >= 90 THEN 90
-                    ELSE   TRUNC(MONTHS_BETWEEN('08/01/2018',coh.birth_date)/12)      
+               ,case when (coh.FIRST_HIV_DX_DATE is not null and coh.FIRST_HIV_LAB_DATE is null)
+                                                                                then TRUNC(MONTHS_BETWEEN(coh.FIRST_HIV_DX_DATE,coh.birth_date)/12)
+                     when (coh.FIRST_HIV_DX_DATE is null and coh.FIRST_HIV_LAB_DATE is not null)
+                                                                                then TRUNC(MONTHS_BETWEEN(coh.FIRST_HIV_LAB_DATE,coh.birth_date)/12)
+
+                    when (coh.FIRST_HIV_DX_DATE is not null and coh.FIRST_HIV_LAB_DATE is not null)
+                        and (coh.FIRST_HIV_DX_DATE <= coh.FIRST_HIV_LAB_DATE ) then TRUNC(MONTHS_BETWEEN(coh.FIRST_HIV_DX_DATE,coh.birth_date)/12)
+                    when (coh.FIRST_HIV_DX_DATE is not null and coh.FIRST_HIV_LAB_DATE is not null)
+                        and (coh.FIRST_HIV_DX_DATE > coh.FIRST_HIV_LAB_DATE ) then TRUNC(MONTHS_BETWEEN(coh.FIRST_HIV_LAB_DATE,coh.birth_date)/12)
                 END age
                ,pat.sex                            	AS gender
 --               ,coh.mapped_race_name               	AS race
