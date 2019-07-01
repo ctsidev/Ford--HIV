@@ -1,7 +1,21 @@
 /****** Script for SelectTopNRows command from SSMS  ******/
-SELECT conc.concept_code, count(*)
-  FROM [OMOP].[dbo].[measurement] meas
-  join [OMOP].[dbo].[concept] conc on meas.measurement_concept_id = conc.concept_id
+select
+x.lab_concept_code, 
+x.lab_concept_name,
+x.result_concept_code,
+x.result_concept_name
+, case when x.lab_count < 10 then 10 else x.lab_count end lab_count
+from (
+SELECT 
+--distinct 
+conc.concept_code as lab_concept_code, 
+conc.concept_name as lab_concept_name,
+conc2.concept_code as result_concept_code,
+conc2.concept_name as result_concept_name,
+count(*) as lab_count
+  FROM [OMOP].[dbo].[measurement]		meas
+  join [OMOP].[dbo].[concept]			conc on meas.measurement_concept_id = conc.concept_id
+  LEFT JOIN [OMOP].[dbo].[concept]		conc2 ON meas.value_as_concept_id = conc2.concept_id 
   where conc.concept_code in ('74856-6',
 '49573-9',
 '48558-1',
@@ -299,5 +313,5 @@ SELECT conc.concept_code, count(*)
 '49660-4',
 '49665-3'
 )
-group by concept_code
-;
+group by conc.concept_code, conc.concept_name,conc2.concept_code,conc2.concept_name
+) x;
