@@ -236,6 +236,11 @@ SELECT DISTINCT pat.study_id
                ,lab.reference_low 
                ,lab.reference_high
                ,lab2.BIP_LOINC_MAPPING as loinc_code
+               ,lab.HARM_TEXT_VAL
+            ,lab.ORD_NUM_VALUE
+            ,lab.HARM_NUM_VAL
+            ,lab.HARM_SIGN
+            ,lab.REF_NORMAL_VALS
 FROM xdr_FORD_lab          			lab 
 JOIN XDR_FORD_pat          			pat  on lab.pat_id = pat.pat_id
 -- JOIN XDR_FORD_ENCKEY       			enck on lab.pat_enc_csn_id = enck.pat_enc_csn_id
